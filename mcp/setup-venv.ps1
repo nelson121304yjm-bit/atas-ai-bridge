@@ -3,7 +3,7 @@
 # ASCII-only on purpose: Windows PowerShell 5.1 decodes BOM-less .ps1 files with
 # the system ANSI codepage (GBK on zh-CN), which corrupts non-ASCII text.
 #
-# Why a venv: the machine already has mcp 1.29.1 globally, and this server needs
+# Why a venv: a machine may already have mcp 1.x globally, and this server needs
 # mcp >= 2.0 (mcp.server.mcpserver.MCPServer does not exist in 1.x). Installing
 # into the venv avoids breaking other tools that depend on mcp 1.x.
 $ErrorActionPreference = 'Stop'

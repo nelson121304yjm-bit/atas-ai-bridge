@@ -4,7 +4,7 @@
 # BOM-less .ps1 files using the system ANSI codepage (GBK on zh-CN), which
 # corrupts non-ASCII characters and breaks parsing.
 #
-# The build only READS the ATAS assemblies on D: (all Private=false in the
+# The build only READS the ATAS assemblies (all Private=false in the
 # csproj); the output goes to %APPDATA%\ATAS\Strategies only, so the ATAS
 # installation directory is never modified.
 #

@@ -65,11 +65,11 @@ atas-ai-bridge/
 
 前置：
 
-- **.NET 10 SDK**。ATAS 8.0.14 跑在 .NET 10
+- **.NET 10 SDK**。ATAS 8.x 跑在 .NET 10
   （`OFT.Platform.runtimeconfig.json` 里 `tfm=net10.0`），所以 `TargetFramework` 必须是
   `net10.0-windows`，不能用官方默认的 net8。
-- ATAS 默认装在 `C:\Program Files (x86)\ATAS Platform`；若装在别处（如本例的 D 盘），
-  csproj 里的 `ATAS_BASE` 已按此设置，可用 `-p:ATAS_BASE=...` 覆盖。
+- ATAS 默认装在 `C:\Program Files (x86)\ATAS Platform`（csproj 里 `ATAS_BASE` 的默认值）；
+  若装在别处，用 `-p:ATAS_BASE=...` 覆盖。
 - csproj 里所有 ATAS 引用都是 `Private=false`：**只读引用**，不会把 ATAS 的 DLL 拷进产物。
 
 ## 在 ATAS 里启用
@@ -120,7 +120,7 @@ ATAS 自己的日志（`%APPDATA%\ATAS\Logs\app_YYYYMMDD.log`）里认这三个�
 3. 搜日志里**有没有 `Starting with portfolio ... security ...` 这一行**：
    **有** = 组合没问题、是连接掉了（会自愈）；**没有** = 组合就没通过，跟网络无关。
 
-**本机根因（2026-09-25，实测日志）**：不是网络、不是桥的代码，是
+**根因（2026-09-25，实测日志）**：不是网络、不是桥的代码，是
 **(Portfolio, Security) 组合不匹配**。
 
 - 账户（如 `CRYPTOxxxxx`）来自对应服务器的**模拟连接**，启动时注册的能力决定了
@@ -148,7 +148,7 @@ ATAS 自己的日志（`%APPDATA%\ATAS\Logs\app_YYYYMMDD.log`）里认这三个�
 > → `Subscribing ETHUSDT@Binance`，连的是 `wss://stream.binance.com:9443`）。
 > 排障顺序：**先看有没有 `Starting with portfolio ...` 那一行**，再谈网络。
 
-**这类连接会持续抖**：本机 `Crypto Sim` 实测每 20–30 秒掉一次，每次掉线 ATAS 都停策略、
+**这类连接会持续抖**：`Crypto Sim` 实测每 20–30 秒掉一次，每次掉线 ATAS 都停策略、
 重连后再启（所以端口文件时间戳会反复刷新）。**桥跟着一起抖是设计使然**，不是 bug。
 
 > 想让桥**不受行情连接影响**（连接掉线也能读）需要把桥从 `ChartStrategy` 改成
@@ -263,7 +263,7 @@ atas_set_settings({"snapshotFootprintBars": 2})       # 用完改回去
 ```
 
 先跑一次 `mcp\setup-venv.ps1`（建独立 venv 装 mcp 2.x）。
-**必须用 venv**：本机全局是 mcp 1.29.1，而 `mcp.server.mcpserver.MCPServer` 在 1.x 不存在，
+**必须用 venv**：若全局环境里是 mcp 1.x，而 `mcp.server.mcpserver.MCPServer` 在 1.x 不存在，
 直接用全局 Python 会 `ImportError`；装到 venv 也不会顶掉其它依赖 mcp 1.x 的工具。
 
 ## 数据口径（都来自 ATAS 官方 API，非猜测）
@@ -330,12 +330,12 @@ atas_set_settings({"snapshotFootprintBars": 2})       # 用完改回去
 
 ## 开发环境坑（已踩过，别再踩）
 
-1. **本机 `pwsh` 实际是 Windows PowerShell 5.1**，它读取**无 BOM 的 `.ps1`** 时按系统 ANSI
+1. **`.ps1` 在 Windows PowerShell 5.1 下**：它读取**无 BOM 的 `.ps1`** 时按系统 ANSI
    （zh-CN = GBK）解码 → 中文注释变乱码 → 语法解析直接崩（报错位置还很误导）。
    **所有 `.ps1` 一律只用 ASCII**（本项目的 `build.ps1`、`setup-venv.ps1` 都是）。
 2. **`.cs` 里的中文**：csc 在中文 Windows 上可能按 ANSI 读源码 → 已在 csproj 里设
    `<CodePage>65001</CodePage>` 强制 UTF-8。
 3. `MarketDataType` 在 `ATAS.DataFeedsCore` 与 `ATAS.Indicators` 里同名，必须用
    `using MarketDataType = ATAS.Indicators.MarketDataType;` 消歧。
-4. 编译用 PATH 里的 `dotnet`（本仓库开发机装在用户目录，未进 PATH，用的是
-   `%USERPROFILE%\.dotnet\dotnet.exe`）。
+4. 编译用 PATH 里的 `dotnet`；若本机装在用户目录未进 PATH，`build.ps1` 会回退到
+   `%USERPROFILE%\.dotnet\dotnet.exe`。
