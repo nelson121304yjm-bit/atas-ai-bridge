@@ -1,7 +1,11 @@
 # ATAS AI Bridge
 
 把 **ATAS 图表上的订单流数据**（逐价买卖量 footprint、区间成交量分布 profile、累计 delta、
-委托簿）通过 **MCP** 交给 AI 助手。为「学习订单流」重写，不是原 `Ax3lsk3r3/atas-mcp` 的补丁版。
+委托簿）通过 **MCP** 交给 AI 助手。
+
+> **上游致谢**：本项目基于 `Ax3lsk3r3/atas-mcp`（https://github.com/Ax3lsk3r3/atas-mcp）
+> 为「学习订单流」**重写**，不是原仓库的补丁版。原仓库的整体结构（ATAS 策略 + 本地
+> HTTP 桥 + Python MCP server）是起点，下文「为什么重写」列的是相对原版的改动点。
 
 ## 为什么重写
 
@@ -41,7 +45,7 @@ HTTP 线程只读内存里的 JSON 快照。只有「指定历史 bar 的按需�
 atas-ai-bridge/
 ├─ build.ps1                       # 编译 + 部署到 %APPDATA%\ATAS\Strategies
 ├─ src/ATAS.AiBridge/
-│   ├─ ATAS.AiBridge.csproj        # net10.0-windows，ATAS_BASE 默认 D 盘
+│   ├─ ATAS.AiBridge.csproj        # net10.0-windows，ATAS_BASE 默认 C 盘官方路径
 │   ├─ AiBridgeStrategy.cs         # 策略主体：取数、快照、端点、下单闸门
 │   └─ BridgeServer.cs             # TcpListener 版最小 HTTP 服务器
 └─ mcp/
