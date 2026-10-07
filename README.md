@@ -68,8 +68,10 @@ atas-ai-bridge/
 - **.NET 10 SDK**。ATAS 8.x 跑在 .NET 10
   （`OFT.Platform.runtimeconfig.json` 里 `tfm=net10.0`），所以 `TargetFramework` 必须是
   `net10.0-windows`，不能用官方默认的 net8。
-- ATAS 默认装在 `C:\Program Files (x86)\ATAS Platform`（csproj 里 `ATAS_BASE` 的默认值）；
-  若装在别处，用 `-p:ATAS_BASE=...` 覆盖。
+- ATAS 常见装在 `C:\Program Files (x86)\ATAS Platform`，也可能装在别处（如 D 盘）。
+  `build.ps1` 会**自动探测**常见安装路径；探测不到或要指定别的路径时，显式传参：
+  `.\build.ps1 -AtasBase 'D:\Program Files (x86)\ATAS Platform'`
+  （底层等价于 MSBuild 的 `-p:ATAS_BASE=...`；直接 `dotnet build` 时才需要自己加）。
 - csproj 里所有 ATAS 引用都是 `Private=false`：**只读引用**，不会把 ATAS 的 DLL 拷进产物。
 
 ## 在 ATAS 里启用

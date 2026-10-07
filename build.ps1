@@ -11,10 +11,12 @@
 # Usage:
 #   .\build.ps1              # build + deploy
 #   .\build.ps1 -NoDeploy    # build only
+#   .\build.ps1 -AtasBase 'D:\Program Files (x86)\ATAS Platform'   # override install dir
 param(
     [switch]$NoDeploy,
     [switch]$Force,
-    [string]$Configuration = 'Release'
+    [string]$Configuration = 'Release',
+    [string]$AtasBase = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,8 +27,33 @@ $proj = Join-Path $root 'src\ATAS.AiBridge\ATAS.AiBridge.csproj'
 $dotnet = Join-Path $env:USERPROFILE '.dotnet\dotnet.exe'
 if (-not (Test-Path $dotnet)) { $dotnet = 'dotnet' }
 
+# Resolve the ATAS install directory. The csproj default is the C: official path,
+# but ATAS is commonly installed elsewhere (e.g. D:). Auto-detect so a plain
+# .\build.ps1 works on any machine, and fail loudly instead of a cryptic MSBuild error.
+if (-not $AtasBase) {
+    $probe = @(
+        'C:\Program Files (x86)\ATAS Platform',
+        'C:\Program Files\ATAS Platform',
+        'D:\Program Files (x86)\ATAS Platform',
+        'D:\Program Files\ATAS Platform',
+        'D:\ATAS Platform'
+    )
+    foreach ($candidate in $probe) {
+        if (Test-Path (Join-Path $candidate 'ATAS.Indicators.dll')) { $AtasBase = $candidate; break }
+    }
+}
+
+if (-not $AtasBase) {
+    throw "ATAS install dir not found. Pass it explicitly: .\build.ps1 -AtasBase 'X:\path\to\ATAS Platform'"
+}
+
+if (-not (Test-Path (Join-Path $AtasBase 'ATAS.Indicators.dll'))) {
+    throw "ATAS.Indicators.dll not found under: $AtasBase (pass -AtasBase with the correct path)"
+}
+
 Write-Host "dotnet: $dotnet" -ForegroundColor Cyan
-& $dotnet build $proj -c $Configuration -v minimal
+Write-Host "ATAS_BASE: $AtasBase" -ForegroundColor Cyan
+& $dotnet build $proj -c $Configuration -v minimal "-p:ATAS_BASE=$AtasBase"
 if ($LASTEXITCODE -ne 0) { throw "build failed (exit $LASTEXITCODE)" }
 
 if ($NoDeploy) { Write-Host 'skip deploy' -ForegroundColor Yellow; exit 0 }
