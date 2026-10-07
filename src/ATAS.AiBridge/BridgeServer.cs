@@ -218,7 +218,6 @@ internal sealed class BridgeServer
             .Append("Content-Type: application/json; charset=utf-8\r\n")
             .Append("Content-Length: ").Append(payload.Length).Append("\r\n")
             .Append("Cache-Control: no-store\r\n")
-            .Append("Access-Control-Allow-Origin: *\r\n")
             .Append("Connection: close\r\n\r\n")
             .ToString();
 
