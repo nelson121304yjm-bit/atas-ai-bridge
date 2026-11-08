@@ -27,7 +27,7 @@ ATAS 进程（.NET 10）
        └─ BridgeServer（TcpListener, 127.0.0.1:8790..8810）
                     │  HTTP/1.1 + JSON
                     ▼
-        mcp/server.py（Python, mcp 2.x, stdio）  ← 11 个只读工具（+3 个下单工具，默认隐藏）
+        mcp/server.py（Python, mcp 2.x, stdio）  ← 11 个工具（含设置写入；+3 个交易工具默认隐藏）
                     │  MCP
                     ▼
               AI 客户端（DSH / Claude Code / Cursor / …）
@@ -44,18 +44,39 @@ HTTP 线程只读内存里的 JSON 快照。只有「指定历史 bar 的按需�
 ```
 atas-ai-bridge/
 ├─ build.ps1                       # 编译 + 部署到 %APPDATA%\ATAS\Strategies
+├─ build.sh                        # macOS：默认只构建，--install 显式安装
 ├─ src/ATAS.AiBridge/
-│   ├─ ATAS.AiBridge.csproj        # net10.0-windows，ATAS_BASE 默认 C 盘官方路径
+│   ├─ ATAS.AiBridge.csproj        # Windows: net10.0-windows / macOS: net10.0
 │   ├─ AiBridgeStrategy.cs         # 策略主体：取数、快照、端点、下单闸门
 │   └─ BridgeServer.cs             # TcpListener 版最小 HTTP 服务器
 └─ mcp/
-    ├─ server.py                   # MCP server（11 只读工具；下单工具按环境变量注册）
+    ├─ server.py                   # MCP server（11 默认工具，含设置写入；交易工具另行注册）
     ├─ atas_client.py              # 纯标准库 HTTP 客户端 + 端口自动发现
     ├─ requirements.txt            # mcp>=2.0.0
-    └─ setup-venv.ps1              # 建独立 venv 并安装依赖
+    ├─ setup-venv.ps1              # Windows：建独立 venv 并安装依赖
+    └─ setup-venv.sh               # macOS：建独立 venv 并输出 stdio 配置
 ```
 
 ## 构建与部署
+
+### macOS / ATAS X
+
+需要安装 **ATAS X、.NET 10 SDK 和 Python 3.10+**。在项目根目录运行：
+
+```bash
+bash build.sh                   # 只构建，不修改 ATAS
+# 退出 ATAS 后再显式安装（旧插件会先备份）：
+bash build.sh --install
+bash mcp/setup-venv.sh           # 建独立 venv，输出 MCP 客户端配置
+```
+
+脚本默认读取 `/Applications/ATAS X.app/Contents/MonoBundle` 的 SDK，安装到
+`~/Library/Application Support/ATAS/Strategies`，不复制 ATAS 厂商 DLL。
+MCP 会从 macOS 的 Application Support 目录自动发现桥端口。
+**本分支已做本机 SDK 构建和 MCP 启动测试；ATAS 内实际加载与行情查询仍须在模拟图表验收。**
+完整步骤、端口配置、回退和验证范围见 [macOS 指南](docs/macos.md)。
+
+### Windows（原有流程）
 
 ```powershell
 # 编译 + 部署（产物只落 %APPDATA%\ATAS\Strategies，安装目录零改动）
@@ -67,7 +88,7 @@ atas-ai-bridge/
 
 - **.NET 10 SDK**。ATAS 8.x 跑在 .NET 10
   （`OFT.Platform.runtimeconfig.json` 里 `tfm=net10.0`），所以 `TargetFramework` 必须是
-  `net10.0-windows`，不能用官方默认的 net8。
+  与运行时一致：Windows 使用 `net10.0-windows`，macOS 使用 `net10.0`，不能用 net8。
 - ATAS 常见装在 `C:\Program Files (x86)\ATAS Platform`，也可能装在别处（如 D 盘）。
   `build.ps1` 会**自动探测**常见安装路径；探测不到或要指定别的路径时，显式传参：
   `.\build.ps1 -AtasBase 'D:\Program Files (x86)\ATAS Platform'`
@@ -98,7 +119,7 @@ atas-ai-bridge/
    不会让已运行的 ATAS 重新加载它（重启 ATAS 或删掉策略重新 Add 才生效）。
 
 **排查**：若第 4 步启动不了，看 ATAS 是否配了交易连接（`ChartStrategy` 带交易功能，
-可能需要 Security/Portfolio/Connector 就绪）。桥本身只读，但基类可能仍要求这些就绪。
+可能需要 Security/Portfolio/Connector 就绪）。即使只使用行情查询，基类仍可能要求这些就绪。
 
 ### 🔴 排障：桥"昨天还能用，今天连不上"（2026-09-25 实际踩到）
 
@@ -157,8 +178,9 @@ ATAS 自己的日志（`%APPDATA%\ATAS\Logs\app_YYYYMMDD.log`）里认这三个�
 > `Indicator` 挂载——Indicator 不要求交易连接就绪。代价是失去下单能力（Indicator
 > 没有 `OpenOrder`），这是个设计取舍，未实现。
 
-端口：默认 8790，被占用则顺延到 8810；实际端口写入 `%APPDATA%\ATAS\AiBridge.port`，
-Python 侧会自动读取，无需手工配置。
+端口：默认 8790，被占用则顺延到 8810；Windows 写入 `%APPDATA%\ATAS\AiBridge.port`，
+macOS 写入 `~/Library/Application Support/ATAS/AiBridge.port`（也兼容对应 `ATAS X` 目录）。
+Python 侧会自动读取；可用 `ATAS_AI_BRIDGE_PORT` 显式指定，完整规则见 [macOS 指南](docs/macos.md)。
 
 ### 策略设置项
 
@@ -227,7 +249,7 @@ Python 侧会自动读取，无需手工配置。
 
 ## MCP 工具
 
-只读（11 个，始终注册）：
+默认工具（11 个，始终注册；其中 `atas_set_settings` 可写设置）：
 
 `atas_status` · `atas_quote` · `atas_dom` · `atas_footprint` · `atas_footprint_recent` ·
 `atas_profile` · `atas_cvd` · `atas_candles` · `atas_log` ·
@@ -264,7 +286,8 @@ atas_set_settings({"snapshotFootprintBars": 2})       # 用完改回去
 }
 ```
 
-先跑一次 `mcp\setup-venv.ps1`（建独立 venv 装 mcp 2.x）。
+Windows 先跑一次 `mcp\setup-venv.ps1`；macOS 在项目根目录运行 `bash mcp/setup-venv.sh`
+（建独立 venv 装 mcp 2.x，Mac 脚本会输出对应的客户端配置）。
 **必须用 venv**：若全局环境里是 mcp 1.x，而 `mcp.server.mcpserver.MCPServer` 在 1.x 不存在，
 直接用全局 Python 会 `ImportError`；装到 venv 也不会顶掉其它依赖 mcp 1.x 的工具。
 
