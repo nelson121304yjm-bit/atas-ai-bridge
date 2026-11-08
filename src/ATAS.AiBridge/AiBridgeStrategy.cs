@@ -33,7 +33,12 @@ using MarketDataType = ATAS.Indicators.MarketDataType;
 ///  3) 下单默认关闭：AllowTrading=false 且 TradeToken 为空时，下单端点一律拒绝。
 ///  4) HTTP 用 TcpListener 自实现，免管理员/免 urlacl，只绑 127.0.0.1。
 /// </summary>
-public class AiBridgeStrategy : ChartStrategy
+#if MAC_INDICATOR
+[System.ComponentModel.DisplayName("AI Bridge — read only")]
+public partial class AiBridgeStrategy : Indicator
+#else
+public partial class AiBridgeStrategy : ChartStrategy
+#endif
 {
     private const string BridgeId = "atas-ai-bridge";
     private const string BridgeVersion = "0.2.0";
@@ -87,6 +92,12 @@ public class AiBridgeStrategy : ChartStrategy
     [Display(Name = "默认 DOM 档数", GroupName = "AI Bridge", Order = 60)]
     public int DefaultDomLevels { get => _defaultDomLevels; set => _defaultDomLevels = value; }
 
+#if MAC_INDICATOR
+    [System.ComponentModel.Browsable(false)]
+    public bool AllowTrading => false;
+    [System.ComponentModel.Browsable(false)]
+    public string TradeToken => "";
+#else
     private volatile bool _allowTrading = false;
 
     [Display(Name = "允许下单（默认关闭）", GroupName = "AI Bridge 风控", Order = 10)]
@@ -96,6 +107,7 @@ public class AiBridgeStrategy : ChartStrategy
 
     [Display(Name = "下单确认口令（留空=禁止下单）", GroupName = "AI Bridge 风控", Order = 20)]
     public string TradeToken { get => _tradeToken; set => _tradeToken = value ?? ""; }
+#endif
 
     #endregion
 
@@ -146,6 +158,7 @@ public class AiBridgeStrategy : ChartStrategy
 
     #region 生命周期（ATAS 线程）
 
+#if !MAC_INDICATOR
     protected override void OnStarted()
     {
         Log("OnStarted, activated=" + IsActivated + ", bridge=" + BridgeEnabled);
@@ -178,11 +191,16 @@ public class AiBridgeStrategy : ChartStrategy
         try { _server?.Stop(); } catch { }
         _server = null;
     }
+#endif
 
     protected override void OnCalculate(int bar, decimal value)
     {
         try
         {
+#if MAC_INDICATOR
+            if (!_hostRunning || bar != CurrentBar - 1)
+                return;
+#endif
             DrainActions();
             RefreshSnapshots(bar);
         }
@@ -192,6 +210,7 @@ public class AiBridgeStrategy : ChartStrategy
         }
     }
 
+#if !MAC_INDICATOR
     protected override void OnOrderChanged(Order order)
     {
         try
@@ -206,6 +225,7 @@ public class AiBridgeStrategy : ChartStrategy
             Log("OnOrderChanged error: " + ex.Message);
         }
     }
+#endif
 
     #endregion
 
@@ -315,6 +335,10 @@ public class AiBridgeStrategy : ChartStrategy
                 ["profileValueAreaPercent"] = ProfileValueAreaPercent,
                 ["defaultDomLevels"] = DefaultDomLevels,
                 ["tradeTokenSet"] = !string.IsNullOrWhiteSpace(TradeToken),
+#if MAC_INDICATOR
+                ["hostMode"] = "indicator",
+                ["readOnly"] = true,
+#endif
                 ["serverTime"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
             }, JsonOpts);
         }
@@ -723,6 +747,10 @@ public class AiBridgeStrategy : ChartStrategy
         }, JsonOpts);
     }
 
+#if MAC_INDICATOR
+    private string BuildPosition() => Error("Account positions are not provided by this read-only indicator.");
+    private string BuildOrders() => Error("Account orders are not provided by this read-only indicator.");
+#else
     private string BuildPosition()
     {
         try
@@ -783,6 +811,7 @@ public class AiBridgeStrategy : ChartStrategy
         _positionJson = BuildPosition();
         _ordersJson = BuildOrders();
     }
+#endif
 
     #endregion
 
@@ -797,7 +826,7 @@ public class AiBridgeStrategy : ChartStrategy
         public int Min;
         public int Max;
         public string Description;
-        public bool Sensitive;       // 值不回显（口令类）
+        public bool Sensitive = false; // 值不回显（口令类）
         public bool RuntimeEditable; // 运行中改是否有效
         public Func<object> Read;
         public Action<object> Write;
@@ -860,6 +889,7 @@ public class AiBridgeStrategy : ChartStrategy
                 Read = () => DefaultDomLevels,
                 Write = value => DefaultDomLevels = (int)value
             },
+#if !MAC_INDICATOR
             new SettingDescriptor
             {
                 Key = "allowTrading", Name = "允许下单", Group = "AI Bridge 风控", Type = "bool",
@@ -877,6 +907,7 @@ public class AiBridgeStrategy : ChartStrategy
                 Read = () => TradeToken,
                 Write = value => TradeToken = (string)value
             }
+#endif
         };
     }
 
@@ -892,7 +923,11 @@ public class AiBridgeStrategy : ChartStrategy
                 ["name"] = setting.Name,
                 ["group"] = setting.Group,
                 ["type"] = setting.Type,
+#if MAC_INDICATOR
+                ["runtimeEditable"] = false,
+#else
                 ["runtimeEditable"] = setting.RuntimeEditable,
+#endif
                 ["description"] = setting.Description
             };
 
@@ -933,8 +968,13 @@ public class AiBridgeStrategy : ChartStrategy
                 ["isActivated"] = IsActivated,
                 ["tradingArmed"] = IsTradingArmed(),
                 ["settings"] = BuildSettingsJson(),
+#if MAC_INDICATOR
+                ["readOnly"] = true,
+                ["note"] = "只读指标：只能在 ATAS 指标设置中配置参数，HTTP 不接受修改。"
+#else
                 ["note"] = "运行中修改只在内存生效：ATAS 重启 / 重新加载策略后会回到属性面板里保存的值。"
                            + "口令类设置（tradeToken）不回显原值。"
+#endif
             }, JsonOpts);
         }
         catch (Exception ex)
@@ -1093,6 +1133,14 @@ public class AiBridgeStrategy : ChartStrategy
 
     private string HandleRequest(string method, string path, Dictionary<string, string> query, string body)
     {
+#if MAC_INDICATOR
+        if (method != "GET")
+            return Error("This indicator is read-only; only GET requests are supported.");
+        if (path == "/api/position" || path == "/api/orders" ||
+            path == "/api/order" || path.StartsWith("/api/order/", StringComparison.Ordinal) ||
+            path.StartsWith("/api/position/", StringComparison.Ordinal))
+            return Error("Trading and account endpoints are unavailable in the read-only indicator.");
+#endif
         switch (path)
         {
             case "/api/health":
@@ -1101,6 +1149,10 @@ public class AiBridgeStrategy : ChartStrategy
                     ["ok"] = true,
                     ["bridge"] = BridgeId,
                     ["version"] = BridgeVersion,
+#if MAC_INDICATOR
+                    ["hostMode"] = "indicator",
+                    ["readOnly"] = true,
+#endif
                     ["port"] = _server?.Port ?? 0,
                     ["isActivated"] = IsActivated
                 }, JsonOpts);
@@ -1165,6 +1217,7 @@ public class AiBridgeStrategy : ChartStrategy
                 return RunOnAtasThread(() => BuildProfile(bars, percent, top), 5000);
             }
 
+#if !MAC_INDICATOR
             case "/api/order":
                 if (method != "POST")
                     return Error("POST required");
@@ -1179,6 +1232,7 @@ public class AiBridgeStrategy : ChartStrategy
                 if (method != "POST")
                     return Error("POST required");
                 return RunOnAtasThread(() => FlattenPosition(body), 4000);
+#endif
 
             default:
                 return Error("unknown endpoint: " + path);
@@ -1203,6 +1257,7 @@ public class AiBridgeStrategy : ChartStrategy
 
     #region 下单（默认关闭，双重闸门）
 
+#if !MAC_INDICATOR
     private string PlaceOrder(string body)
     {
         if (!IsTradingArmed())
@@ -1347,6 +1402,7 @@ public class AiBridgeStrategy : ChartStrategy
             ["direction"] = closeDirection.ToString()
         }, JsonOpts);
     }
+#endif
 
     #endregion
 

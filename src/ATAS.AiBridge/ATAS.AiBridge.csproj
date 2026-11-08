@@ -11,6 +11,8 @@
     <AssemblyName>ATAS.AiBridge</AssemblyName>
     <RootNamespace>ATAS.AiBridge</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
+    <MacIndicatorHost Condition="'$(MacIndicatorHost)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">true</MacIndicatorHost>
+    <DefineConstants Condition="'$(MacIndicatorHost)' == 'true'">$(DefineConstants);MAC_INDICATOR</DefineConstants>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <OutputPath>../../out/</OutputPath>
     <!-- 按宿主平台选择 SDK 目录；可用 -p:ATAS_BASE=... 覆盖。 -->
