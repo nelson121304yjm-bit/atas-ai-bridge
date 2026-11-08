@@ -96,9 +96,10 @@ class AtasBridgeClient:
         except urllib.error.URLError as exc:
             self.rediscover()
             raise BridgeError(
-                f"无法连接 ATAS AI Bridge（{url}）。请确认：ATAS 正在运行、图表上已添加 "
-                f"AI Bridge 策略，并已按策略条目的控制按钮启动。"
-                f"若启动失败，请检查图表的数据连接、标的和账户组合；"
+                f"无法连接 ATAS AI Bridge（{url}）。请确认 ATAS 正在运行。"
+                f"Mac：在图表指标列表添加 AI Bridge — read only 并应用；"
+                f"Windows：添加 AI Bridge 策略，并按策略条目的控制按钮启动。"
+                f"若仍失败，请检查图表的数据连接、标的和账户组合；"
                 f"IsActivated 是只读运行状态，不是勾选项。({exc})"
             ) from exc
 

@@ -41,6 +41,11 @@ else
     // before they access any SDK state or mutable instance collections.
     var host = RuntimeHelpers.GetUninitializedObject(type);
     var handler = type.GetMethod("HandleRequest", flags)!;
+    var waitingJson = (string)handler.Invoke(host, new object[] {
+        "GET", "/api/quote", new Dictionary<string, string>(), "" })!;
+    using (var waiting = JsonDocument.Parse(waitingJson ?? "{}"))
+        Check(waiting.RootElement.TryGetProperty("ok", out var waitingOk) && !waitingOk.GetBoolean(),
+              "market queries before initialization must report unavailable data");
     foreach (var (method, path, body) in new[] {
         ("POST", "/api/settings", "{\"set\":{\"allowTrading\":true}}"),
         ("POST", "/api/order", "{}"), ("GET", "/api/order", ""),
@@ -55,5 +60,39 @@ else
               method + " " + path + " must be rejected");
         Check(!result.RootElement.TryGetProperty("netVolume", out _), "do not fabricate account flatness");
     }
+
+    type.GetField("_statusJson", flags)!.SetValue(host, "{\"ok\":true}");
+    JsonDocument Status() => JsonDocument.Parse((string)handler.Invoke(host,
+        new object[] { "GET", "/api/status", new Dictionary<string, string>(), "" })!);
+    using (var status = Status())
+    {
+        Check(status.RootElement.TryGetProperty("freshness", out var freshness),
+              "status must expose collection freshness before any live data");
+        Check(freshness.GetProperty("snapshotStale").GetBoolean(), "unobserved data must be stale");
+        Check(freshness.GetProperty("marketEventStale").GetBoolean(), "unobserved market events must be stale");
+    }
+    foreach (var field in new[] { "_lastSnapshotTicks", "_lastMarketEventTicks" })
+        type.GetField(field, flags)!.SetValue(host, DateTime.UtcNow.AddSeconds(-10).Ticks);
+    using (var status = Status())
+        Check(status.RootElement.GetProperty("freshness").GetProperty("snapshotStale").GetBoolean(),
+              "cached data becomes stale even without another chart callback");
+    foreach (var field in new[] { "_lastSnapshotTicks", "_lastMarketEventTicks" })
+        type.GetField(field, flags)!.SetValue(host, DateTime.UtcNow.Ticks);
+    using (var status = Status())
+        Check(!status.RootElement.GetProperty("freshness").GetProperty("marketEventStale").GetBoolean(),
+              "a recent event must be reported as recent");
+
+    var removePort = type.GetMethod("RemovePortFileIfOwned", BindingFlags.Static | BindingFlags.NonPublic);
+    Check(removePort != null, "indicator must clean up only its own port discovery file");
+    var temp = Path.GetTempFileName();
+    try
+    {
+        File.WriteAllText(temp, "8791");
+        removePort!.Invoke(null, new object[] { temp, 8790 });
+        Check(File.ReadAllText(temp) == "8791", "disposing an old instance must preserve a newer port");
+        removePort.Invoke(null, new object[] { temp, 8791 });
+        Check(!File.Exists(temp), "disposing the owner removes its stale discovery file");
+    }
+    finally { File.Delete(temp); }
 }
 Console.WriteLine($"PASS: {args[2]} host contract ({checks} checks)");

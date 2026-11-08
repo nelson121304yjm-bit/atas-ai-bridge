@@ -41,7 +41,11 @@ public partial class AiBridgeStrategy : ChartStrategy
 #endif
 {
     private const string BridgeId = "atas-ai-bridge";
+#if MAC_INDICATOR
+    private const string BridgeVersion = "0.3.0-macos.1";
+#else
     private const string BridgeVersion = "0.2.0";
+#endif
     private const int FirstPort = 8790;
     private const int LastPort = 8810;
 
@@ -203,6 +207,9 @@ public partial class AiBridgeStrategy : ChartStrategy
 #endif
             DrainActions();
             RefreshSnapshots(bar);
+#if MAC_INDICATOR
+            Interlocked.Exchange(ref _lastSnapshotTicks, DateTime.UtcNow.Ticks);
+#endif
         }
         catch (Exception ex)
         {
@@ -338,6 +345,9 @@ public partial class AiBridgeStrategy : ChartStrategy
 #if MAC_INDICATOR
                 ["hostMode"] = "indicator",
                 ["readOnly"] = true,
+                ["securityId"] = TradingManager?.Security?.SecurityId,
+                ["accountIsReal"] = Portfolio?.IsRealAccount,
+                ["accountConnectionState"] = Portfolio?.ConnectionState.ToString(),
 #endif
                 ["serverTime"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
             }, JsonOpts);
@@ -1140,6 +1150,9 @@ public partial class AiBridgeStrategy : ChartStrategy
             path == "/api/order" || path.StartsWith("/api/order/", StringComparison.Ordinal) ||
             path.StartsWith("/api/position/", StringComparison.Ordinal))
             return Error("Trading and account endpoints are unavailable in the read-only indicator.");
+        if (path is "/api/quote" or "/api/dom" or "/api/cvd" or "/api/candles" or "/api/footprint" or "/api/profile")
+            if (!_hostRunning || Interlocked.Read(ref _lastSnapshotTicks) == 0)
+                return Error("Waiting for chart data; inspect /api/status for freshness.");
 #endif
         switch (path)
         {
@@ -1157,7 +1170,11 @@ public partial class AiBridgeStrategy : ChartStrategy
                     ["isActivated"] = IsActivated
                 }, JsonOpts);
 
+#if MAC_INDICATOR
+            case "/api/status": return WithHostFreshness(_statusJson);
+#else
             case "/api/status": return _statusJson;
+#endif
             case "/api/quote": return _quoteJson;
             case "/api/position": return _positionJson;
             case "/api/orders": return _ordersJson;

@@ -12,7 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SDK_DLLS = ("ATAS.Indicators", "ATAS.DataFeedsCore", "ATAS.Strategies",
-            "ATAS.Types", "Utils.Common")
+            "ATAS.Types", "Utils.Common", "OFT.Rendering")
 
 
 class BuildScriptTests(unittest.TestCase):
@@ -31,7 +31,7 @@ class BuildScriptTests(unittest.TestCase):
         for name in SDK_DLLS:
             (self.sdk / (name + ".dll")).touch()
         self.user_dir = self.root / "Application Support" / "ATAS"
-        self.target = self.user_dir / "Strategies" / "ATAS.AiBridge.dll"
+        self.target = self.user_dir / "Indicators" / "ATAS.AiBridge.dll"
         self.log = self.root / "build-args.json"
         tools = self.root / "tools"
         tools.mkdir()
@@ -79,6 +79,7 @@ sys.exit(0 if sys.argv[-1] == os.environ.get('TEST_RUNNING_PROCESS') else 1)
     def test_explicit_install_only_copies_plugin(self):
         result = self.run_script("--install")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.target.is_file(), "macOS must install into Indicators")
         self.assertEqual(self.target.read_bytes(), b"new plugin")
         self.assertEqual([p.name for p in self.target.parent.iterdir()],
                          ["ATAS.AiBridge.dll"])
@@ -88,10 +89,33 @@ sys.exit(0 if sys.argv[-1] == os.environ.get('TEST_RUNNING_PROCESS') else 1)
         self.target.write_bytes(b"old plugin")
         result = self.run_script("--install")
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.target.is_file(), "migration must create an indicator DLL")
         self.assertEqual(self.target.read_bytes(), b"new plugin")
         backups = list(self.target.parent.glob("ATAS.AiBridge.dll.bak.*"))
         self.assertEqual(len(backups), 1)
         self.assertEqual(backups[0].read_bytes(), b"old plugin")
+
+    def test_legacy_strategy_copy_is_backed_up_during_migration(self):
+        legacy = self.user_dir / "Strategies" / "ATAS.AiBridge.dll"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"old strategy")
+        result = self.run_script("--install")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.target.is_file(), "migration must create an indicator DLL")
+        self.assertEqual(self.target.read_bytes(), b"new plugin")
+        self.assertFalse(legacy.exists())
+        backups = list(legacy.parent.glob("ATAS.AiBridge.dll.bak.*"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), b"old strategy")
+
+    def test_build_failure_does_not_migrate_legacy_copy(self):
+        legacy = self.user_dir / "Strategies" / "ATAS.AiBridge.dll"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b"old strategy")
+        result = self.run_script("--install", TEST_BUILD_FAIL="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(legacy.read_bytes(), b"old strategy")
+        self.assertFalse(self.target.exists())
 
     def test_install_refused_for_both_platform_process_names(self):
         for process in ("ATAS X", "OFT.Platform"):

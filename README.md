@@ -71,9 +71,11 @@ bash mcp/setup-venv.sh           # 建独立 venv，输出 MCP 客户端配置
 ```
 
 脚本默认读取 `/Applications/ATAS X.app/Contents/MonoBundle` 的 SDK，安装到
-`~/Library/Application Support/ATAS/Strategies`，不复制 ATAS 厂商 DLL。
+`~/Library/Application Support/ATAS/Indicators`，不复制 ATAS 厂商 DLL。
+Mac 使用 **AI Bridge — read only 指标**：在图表的指标列表添加并应用即可，
+不使用下文的 Windows 图表策略启动按钮。指标显示连接状态，仅提供行情读取；
+不包含下单实现，HTTP 设置写入和账户订单/持仓接口也被拒绝。
 MCP 会从 macOS 的 Application Support 目录自动发现桥端口。
-**本分支已做本机 SDK 构建和 MCP 启动测试；ATAS 内实际加载与行情查询仍须在模拟图表验收。**
 完整步骤、端口配置、回退和验证范围见 [macOS 指南](docs/macos.md)。
 
 ### Windows（原有流程）

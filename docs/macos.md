@@ -1,6 +1,6 @@
 # macOS / ATAS X 使用指南
 
-本分支给现有 ATAS AI Bridge 增加 macOS 构建、安装与端口发现；Windows 的
+本分支给现有 ATAS AI Bridge 增加 macOS 只读指标入口、状态显示、安装与端口发现；Windows 的
 `build.ps1`、`mcp/setup-venv.ps1` 和交易开关行为保持原样。
 MIT 许可证与上游署名保留。
 
@@ -26,8 +26,10 @@ bash build.sh
 bash build.sh --install
 ```
 
-默认安装位置：`~/Library/Application Support/ATAS/Strategies/ATAS.AiBridge.dll`。
+默认安装位置：`~/Library/Application Support/ATAS/Indicators/ATAS.AiBridge.dll`。
 脚本只复制本项目 DLL；已有同名 DLL 会在同目录保存为 `.bak.*`，再替换。
+若之前安装过本分支的策略版，新指标复制成功后，`Strategies/ATAS.AiBridge.dll`
+会被移到同目录的 `.bak.*` 备份，避免两个目录重复加载同名程序集。
 检测到 `ATAS X` 或 `OFT.Platform` 进程时默认拒绝安装。
 `--install --force` 可以显式覆盖此保护，但不代表运行中的平台已经重新加载插件；
 仍须重启平台后再验证。首次使用建议先退出 ATAS。
@@ -74,9 +76,21 @@ bash mcp/setup-venv.sh
 
 ## 4. 在模拟图表启动并检查
 
-按照主 README 的策略加载步骤，添加 **AI Bridge 图表策略**并通过策略控制按钮启动。
-`IsActivated` 是回读状态，不是设置开关。先在模拟账户验证；保留“允许下单”关闭，
-不设置 `ATAS_TRADE_TOKEN`。默认 MCP 工具仍含 `atas_set_settings`，不能把它描述成完全只读服务。
+1. 打开 BTCUSDT（Binance Futures）图表，先选择 Crypto Sim 验证。
+2. 打开图表的**指标**列表，切到 All 或 Custom，搜索 **AI Bridge — read only**。
+3. 添加后点**应用**。此版本由指标生命周期启动，不需要策略启动按钮。
+4. 图表上方会显示 `AI Bridge | READ ONLY | :端口 | 状态`；指标设置的
+   `Bridge status (read only)` 也能读取诊断。`Show bridge status on chart` 控制状态条显示。
+5. 先核对 health/status，再请求其他行情。`waiting live tick` 表示尚未收到新的公开成交；
+   `stale` 表示超过 5 秒未收到公开成交，不应把旧缓存当成实时数据。
+
+Mac 指标构建不包含交易实现，所有非 GET 请求都被拒绝，也不提供账户订单/持仓端点。
+不设置 `ATAS_TRADE_TOKEN`；即便某客户端显示 `atas_set_settings`，Mac 指标也会拒绝写入。
+Windows 策略版仍保留原来的设置写入和交易开关，不能把 Windows 服务也描述成完全只读。
+`IsActivated` 始终是运行状态，不是勾选项。
+
+这个指标与 **BTC Orderflow Lab — SIM recorder** 是两个组件。前者提供当前图表的查询，
+后者负责手动模拟成交日志；添加旧记录器不会启动 AI Bridge，也不会出现 AI 聊天窗口。
 
 启动后，端口会在 8790–8810 范围内选择。Mac 的发现顺序：
 
@@ -104,7 +118,9 @@ print(json.dumps(client.status(), ensure_ascii=False, indent=2))
 PY
 ```
 
-核对实际图表、账户、标的和 `isActivated`，再在 AI 客户端查询 footprint、CVD、DOM。
+核对 `hostMode=indicator`、`readOnly=true`、`securityId`、账户、`isActivated` 和
+`freshness`，再在 AI 客户端查询 footprint、CVD、DOM。`snapshotAgeMs` 是本地快照采集年龄，
+`marketEventAgeMs` 是本地收到公开成交的年龄；两者都不是交易所原始时戳或完整性保证。
 使用 Clash 等代理时，确保 `127.0.0.1`／`localhost` 走本机直连；不需要把桥端口开放到公网。
 
 **不要把 `mcp/verify.py` 当成纯只读检查**：它会测试设置写入并尝试恢复。
@@ -119,7 +135,7 @@ Python **3.13.2** 环境验证：
 - 安装脚本使用临时 SDK／工具测试路径空格、显式安装、备份、运行中拒绝和构建失败不覆盖。
 - 端口发现测试覆盖 Mac 路径、Windows 路径、优先级、无效文件和重新发现。
 - MCP v2 虚拟环境可初始化 stdio 会话并列出工具；测试不调用行情、设置或交易工具。
-- 当前分支的 20 项自动化测试全部通过；MCP 测试使用 `mcp 2.3.0`。
+- Mac 主机类型、只读请求边界、未就绪查询、数据年龄与端口文件归属由实际 DLL 的契约测试覆盖。
 
 运行回归测试：
 
@@ -127,9 +143,13 @@ Python **3.13.2** 环境验证：
 python3 -m unittest discover -s tests -v
 # 含 MCP stdio 集成测试（需要已创建虚拟环境）：
 mcp/.venv/bin/python -m unittest discover -s tests -v
+# 用已构建 DLL 与本机 SDK 执行主机契约测试，不启动 ATAS、不发送订单：
+dotnet run --project tests/host_contract -- out/ATAS.AiBridge.dll \
+  '/Applications/ATAS X.app/Contents/MonoBundle' indicator
 ```
 
-没有在本次开发中加载插件到运行中的 ATAS，因此**平台内加载、策略启动和实时行情端点尚未验收**。
+**新增只读指标的实际平台加载、状态条和实时行情端点仍待本轮运行时验收。**
 Windows 行为有路径回归测试，但没有在 Windows 主机上运行完整构建／平台测试。
-编译及 MCP 协议测试不等于实际行情有效，也不改变上游只统计策略自身成交的仓位口径；
+编译及 MCP 协议测试不等于实际行情有效。Mac 指标不提供账户持仓；Windows 上游策略的
+仓位仍只统计策略自身成交，不包括手动成交。
 手动成交日志、完整交易复盘与用户交易系统／prompt 管理仍是另外的功能。

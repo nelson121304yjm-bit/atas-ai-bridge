@@ -8,8 +8,9 @@ Usage: bash build.sh [--install] [--force] [--configuration Release|Debug]
                      [--atas-base PATH] [--atas-user-dir PATH]
 
 Builds with the installed ATAS X SDK. No files are installed by default.
-  --install          Copy only ATAS.AiBridge.dll into the user's Strategies folder.
+  --install          Copy only ATAS.AiBridge.dll into the user's Indicators folder.
                      An existing DLL is backed up before replacement.
+                     An older Strategies copy is moved to a backup after installation.
   --force            With --install, allow replacement while ATAS is running.
                      Restart ATAS afterwards; this does not reload the plugin.
   --atas-base PATH    SDK directory (default: /Applications/ATAS X.app/Contents/MonoBundle).
@@ -48,7 +49,7 @@ done
 [[ $force -eq 0 || $install -eq 1 ]] || fail "--force requires --install"
 case "$configuration" in Release|Debug) ;; *) fail "Configuration must be Release or Debug" ;; esac
 command -v "$dotnet" >/dev/null 2>&1 || fail "Install .NET 10 SDK or set DOTNET to its executable."
-for name in ATAS.Indicators ATAS.DataFeedsCore ATAS.Strategies ATAS.Types Utils.Common; do
+for name in ATAS.Indicators ATAS.DataFeedsCore ATAS.Strategies ATAS.Types Utils.Common OFT.Rendering; do
     [[ -f "$atas_base/$name.dll" ]] || fail "Missing $atas_base/$name.dll; use --atas-base to select the ATAS X SDK."
 done
 # MSBuild resolves HintPath relative to the project, not the caller's cwd.
@@ -65,7 +66,7 @@ check_running() {
 check_running
 printf 'SDK: %s\n' "$atas_base"
 "$dotnet" build "$root/src/ATAS.AiBridge/ATAS.AiBridge.csproj" \
-    --configuration "$configuration" "-p:ATAS_BASE=$atas_base"
+    --configuration "$configuration" "-p:ATAS_BASE=$atas_base" -p:MacIndicatorHost=true
 
 dll="$root/out/ATAS.AiBridge.dll"
 [[ -f "$dll" ]] || fail "Build did not produce $dll"
@@ -76,7 +77,7 @@ fi
 
 # The platform may have started during compilation.
 check_running
-target_dir="$atas_user_dir/Strategies"
+target_dir="$atas_user_dir/Indicators"
 mkdir -p "$target_dir"
 target="$target_dir/ATAS.AiBridge.dll"
 if [[ -e "$target" ]]; then
@@ -88,4 +89,10 @@ staged="$(mktemp "$target_dir/.ATAS.AiBridge.XXXXXX")"
 trap 'rm -f "$staged"' EXIT
 cp -p "$dll" "$staged"
 mv -f "$staged" "$target"
-printf '\nInstalled: %s\nStart/restart ATAS and add the AI Bridge chart strategy.\n' "$target"
+legacy="$atas_user_dir/Strategies/ATAS.AiBridge.dll"
+if [[ -f "$legacy" ]]; then
+    legacy_backup="$(mktemp "$legacy.bak.XXXXXX")"
+    mv -f "$legacy" "$legacy_backup"
+    printf 'Previous strategy backed up: %s\n' "$legacy_backup"
+fi
+printf '\nInstalled: %s\nStart/restart ATAS and add the AI Bridge — read only indicator.\n' "$target"

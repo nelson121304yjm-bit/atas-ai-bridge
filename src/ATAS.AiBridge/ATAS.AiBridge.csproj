@@ -24,6 +24,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="OFT.Rendering" Condition="'$(MacIndicatorHost)' == 'true'">
+      <HintPath>$(ATAS_BASE)/OFT.Rendering.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="ATAS.DataFeedsCore">
       <HintPath>$(ATAS_BASE)/ATAS.DataFeedsCore.dll</HintPath>
       <Private>false</Private>
