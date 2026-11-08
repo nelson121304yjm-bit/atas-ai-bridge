@@ -2,7 +2,8 @@
 
   <PropertyGroup>
     <!-- 必须与 ATAS 运行时一致：本机 ATAS 8.0.14 跑在 .NET 10（OFT.Platform.runtimeconfig.json tfm=net10.0） -->
-    <TargetFramework>net10.0-windows</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows</TargetFramework>
     <UseWPF>false</UseWPF>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
@@ -11,8 +12,9 @@
     <RootNamespace>ATAS.AiBridge</RootNamespace>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <OutputPath>..\..\out\</OutputPath>
-    <!-- ATAS 默认装在 C 盘（官方默认）；若装在别处，可用 -p:ATAS_BASE=... 覆盖 -->
+    <OutputPath>../../out/</OutputPath>
+    <!-- 按宿主平台选择 SDK 目录；可用 -p:ATAS_BASE=... 覆盖。 -->
+    <ATAS_BASE Condition="'$(ATAS_BASE)' == '' and $([MSBuild]::IsOSPlatform('OSX'))">/Applications/ATAS X.app/Contents/MonoBundle</ATAS_BASE>
     <ATAS_BASE Condition="'$(ATAS_BASE)' == ''">C:\Program Files (x86)\ATAS Platform</ATAS_BASE>
     <NoWarn>1705;MSB3277;CS0618</NoWarn>
     <!-- 源码是 UTF-8 无 BOM 且含中文注释；中文 Windows 上 csc 默认按 ANSI 读会乱码 -->
@@ -21,23 +23,23 @@
 
   <ItemGroup>
     <Reference Include="ATAS.DataFeedsCore">
-      <HintPath>$(ATAS_BASE)\ATAS.DataFeedsCore.dll</HintPath>
+      <HintPath>$(ATAS_BASE)/ATAS.DataFeedsCore.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="ATAS.Indicators">
-      <HintPath>$(ATAS_BASE)\ATAS.Indicators.dll</HintPath>
+      <HintPath>$(ATAS_BASE)/ATAS.Indicators.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="ATAS.Strategies">
-      <HintPath>$(ATAS_BASE)\ATAS.Strategies.dll</HintPath>
+      <HintPath>$(ATAS_BASE)/ATAS.Strategies.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="ATAS.Types">
-      <HintPath>$(ATAS_BASE)\ATAS.Types.dll</HintPath>
+      <HintPath>$(ATAS_BASE)/ATAS.Types.dll</HintPath>
       <Private>false</Private>
     </Reference>
     <Reference Include="Utils.Common">
-      <HintPath>$(ATAS_BASE)\Utils.Common.dll</HintPath>
+      <HintPath>$(ATAS_BASE)/Utils.Common.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>
