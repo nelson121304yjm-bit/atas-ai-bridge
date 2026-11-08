@@ -97,7 +97,9 @@ class AtasBridgeClient:
             self.rediscover()
             raise BridgeError(
                 f"无法连接 ATAS AI Bridge（{url}）。请确认：ATAS 正在运行、图表上已添加 "
-                f"AI Bridge 策略、且勾选了 IsActivated。({exc})"
+                f"AI Bridge 策略，并已按策略条目的控制按钮启动。"
+                f"若启动失败，请检查图表的数据连接、标的和账户组合；"
+                f"IsActivated 是只读运行状态，不是勾选项。({exc})"
             ) from exc
 
         if isinstance(result, dict) and result.get("ok") is False:
