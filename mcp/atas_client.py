@@ -3,8 +3,8 @@
 The bridge runs as an ATAS chart strategy and listens on 127.0.0.1:<port>.
 Port discovery order:
   1. ATAS_AI_BRIDGE_PORT environment variable
-  2. %APPDATA%\\ATAS\\AiBridge.port
-  3. %APPDATA%\\ATAS X\\AiBridge.port
+  2. ATAS/AiBridge.port under macOS Application Support or Windows APPDATA
+  3. ATAS X/AiBridge.port under the same directory
   4. 8790 (first port the bridge tries)
 """
 
@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,14 +20,19 @@ import urllib.request
 DEFAULT_PORT = 8790
 DEFAULT_HOST = "127.0.0.1"
 
-PORT_FILES = [
-    os.path.join(os.environ.get("APPDATA", ""), "ATAS", "AiBridge.port"),
-    os.path.join(os.environ.get("APPDATA", ""), "ATAS X", "AiBridge.port"),
-]
-
 
 class BridgeError(Exception):
     """Raised when the bridge cannot be reached or returns an error."""
+
+
+def _port_files() -> tuple[str, ...]:
+    if sys.platform == "darwin":
+        base = os.path.join(os.path.expanduser("~"), "Library", "Application Support")
+    else:
+        base = os.environ.get("APPDATA")
+    if not base or not os.path.isabs(base):
+        return ()
+    return tuple(os.path.join(base, name, "AiBridge.port") for name in ("ATAS", "ATAS X"))
 
 
 def discover_port() -> int:
@@ -39,7 +45,7 @@ def discover_port() -> int:
         except ValueError:
             pass
 
-    for port_file in PORT_FILES:
+    for port_file in _port_files():
         try:
             with open(port_file, "r", encoding="utf-8") as handle:
                 port = int(handle.read().strip())
