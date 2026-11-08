@@ -49,15 +49,17 @@ def _guard(call):
 
 @server.tool(
     description="ATAS 桥连通状态：品种、tick size、当前 bar、账户、策略是否激活、"
-                "下单是否已武装。排查问题时先调这个。"
+                "下单是否已武装。Mac 指标还提供 hostMode、readOnly 和 freshness；"
+                "分析前先核对品种、模拟账户与数据年龄。本地接收时间不代表交易所延迟或行情完整性。"
 )
 def atas_status() -> dict[str, Any]:
     return _guard(_client.status)
 
 
 @server.tool(
-    description="实时报价：最新价、买一/卖一及各自挂单量、价差，以及盘口累计买量/卖量"
-                "与失衡度（(累计买-累计卖)/(累计买+累计卖)，正数=买盘厚）。"
+    description="图表报价快照：last 来自当前 K 线 Close，买一/卖一及挂单量来自图表 DOM。"
+                "数据受 ATAS 图表价格聚合设置影响，tickSize 不一定是交易所最小报价单位。"
+                "另含价差、盘口累计买量/卖量与失衡度（(累计买-累计卖)/(累计买+累计卖)）。"
 )
 def atas_quote() -> dict[str, Any]:
     return _guard(_client.quote)
@@ -65,7 +67,7 @@ def atas_quote() -> dict[str, Any]:
 
 @server.tool(
     description="挂单簿逐档明细（默认每侧 15 档）：买盘由高到低、卖盘由低到高，逐档价格与挂单量。"
-                "用来看流动性分布、大挂单位置、撤单/补单。"
+                "这是图表聚合后的单次快照，不能单凭一次查询推断撤单、补单、吸收或完整交易所深度。"
 )
 def atas_dom(levels: int = 15) -> dict[str, Any]:
     return _guard(lambda: _client.dom(levels))
@@ -106,8 +108,8 @@ def atas_profile(bars: int = 0, percent: int = 70, top: int = 0) -> Any:
 
 @server.tool(
     description="累计成交量 delta（CVD）序列：每根 K 线的 delta 与累计值，"
-                "口径与 ATAS 官方 CumulativeDelta 一致（会话开始时归零，sessionStart 标记重置点）。"
-                "用来看买卖压力的累积方向与背离。"
+                "从返回窗口起点开始累加，在 sessionStart=true 时归零。"
+                "若窗口从会话中途开始，首次会话重置前是局部累计值，不能冒充完整会话 CVD。"
 )
 def atas_cvd() -> Any:
     return _guard(_client.cvd)

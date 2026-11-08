@@ -109,10 +109,12 @@ public partial class AiBridgeStrategy
             var text = BridgeStatus;
             var measured = context.MeasureString(text, _statusFont);
             var width = Math.Min(area.Width - 16, (int)Math.Ceiling((double)measured.Width) + 20);
-            var box = new Rectangle(area.X + 8, area.Y + 8, width, 28);
+            var height = Math.Max(28, (int)Math.Ceiling((double)measured.Height) + 12);
+            var box = new Rectangle(area.X + 8, area.Y + 8, width, height);
             context.FillRectangle(Color.FromArgb(230, 20, 28, 40), box);
-            context.DrawString(text, _statusFont, Color.White,
-                new Rectangle(box.X + 10, box.Y + 5, box.Width - 20, 22));
+            // The rectangle overload clips the text on the tested Retina host.
+            // Use the measured background and point overload for the glyphs.
+            context.DrawString(text, _statusFont, Color.White, box.X + 10, box.Y + 6);
         }
         catch (Exception ex)
         {

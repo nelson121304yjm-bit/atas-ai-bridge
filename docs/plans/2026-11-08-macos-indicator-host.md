@@ -30,3 +30,21 @@ a separate, intentionally hidden indicator; applying it does not start AI Bridge
    MCP tools to query status, quote, DOM, CVD, candles, footprint and profile.
 4. Document verified limits and push only source, tests and documentation to the
    user's existing fork branch. Do not publish local accounts, records or vendor DLLs.
+
+## Acceptance evidence (2026-11-08)
+
+- Version `0.3.0-macos.2` loaded in ATAS X 8.0.15.663 on the user's SIM BTCUSDT chart.
+- The status label rendered fully after replacing the fixed-height text clipping
+  rectangle with a measured background and the SDK point-based DrawString overload.
+- Actual MCP queries returned fresh status, quote, DOM (15 levels each side),
+  candles (300), CVD (300), current footprint, profile (200 bars, top 10 levels),
+  and immutable settings. No order or settings mutation was requested.
+- One on-demand historical candles query timed out awaiting a chart tick; retry
+  succeeded. Default snapshots remained usable. This limitation is documented.
+- Data interpretation notes now state chart aggregation, window-relative CVD,
+  non-atomic endpoint sampling and DOM coverage limits.
+- The independent SIM journal receiver was restarted using its existing config;
+  its health remained connected after the indicator settings window closed.
+  No new simulated fill was requested or used as part of this bridge acceptance.
+- Mac build: 0 warnings/errors; Python tests: 22; indicator DLL contract: 34 checks.
+  Legacy conditional build: 0 warnings/errors; strategy DLL contract: 2 checks.

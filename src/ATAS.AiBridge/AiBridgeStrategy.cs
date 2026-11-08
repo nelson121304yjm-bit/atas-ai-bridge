@@ -42,7 +42,7 @@ public partial class AiBridgeStrategy : ChartStrategy
 {
     private const string BridgeId = "atas-ai-bridge";
 #if MAC_INDICATOR
-    private const string BridgeVersion = "0.3.0-macos.1";
+    private const string BridgeVersion = "0.3.0-macos.2";
 #else
     private const string BridgeVersion = "0.2.0";
 #endif
