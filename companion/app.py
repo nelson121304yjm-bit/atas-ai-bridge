@@ -43,6 +43,15 @@ def _target(settings):
             "endpoint": settings["base_url"] + "/chat/completions"}
 
 
+def _expect_settings(expected, current):
+    # Call under the Workbench lock, before any vault access or job dispatch.
+    # Compare the exact normalized config shown to this client, never restore it.
+    if (not isinstance(expected, dict) or set(expected) != set(current)
+            or type(expected.get("persist_key")) is not bool or expected != current):
+        raise AppError("settings_conflict", "Provider settings changed or were not loaded. "
+                       "Refresh and reconfirm the displayed destination before trying again.", 409)
+
+
 def _redact_credential(value, key):
     if isinstance(value, str):
         return value.replace(key, "[credential redacted]")
@@ -118,9 +127,10 @@ class Workbench:
         return {**settings, "key_present": present}
 
     def _save_settings(self, payload):
-        _fields(payload, {"base_url", "model", "persist_key", "key", "delete_key"}, code="invalid_settings")
+        _fields(payload, {"base_url", "model", "persist_key", "key", "delete_key", "expected"}, code="invalid_settings")
         with self._lock:
             current = self.store.settings()
+            _expect_settings(payload.get("expected"), current)
             changed = {key: value for key, value in payload.items() if key in current}
             merged = {**current, **changed}
             url = merged["base_url"]
@@ -231,9 +241,11 @@ class Workbench:
             return self.jobs.submit("analysis", operation, persist=consume)
 
     def _test(self, payload):
-        _fields(payload, set())
+        _fields(payload, {"expected"})
         with self._lock:
-            target = _target(self.store.settings())
+            current = self.store.settings()
+            _expect_settings(payload.get("expected"), current)
+            target = _target(current)
             key = self._credentials(target)
             request, _ = checked_request(target["model"], detached(TEST_MESSAGES))
 

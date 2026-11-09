@@ -14,6 +14,7 @@ export const node = (tag, className, content) => {
 let csrf = null;
 let activeJob = null;
 const messages = {
+  settings_conflict: "服务设置已在另一页面变化，或尚未载入。未保存的 Key 已保留；请刷新服务设置，核对地址、模型和模式并重新确认。没有发送模型请求。",
   provider_not_configured: "请先在模型设置中保存服务地址和模型，然后重新生成预览。",
   key_required: "当前服务地址没有可用 Key。请在模型设置中单独保存 Key。",
   provider_auth: "认证失败。请核对当前服务地址的 Key。",

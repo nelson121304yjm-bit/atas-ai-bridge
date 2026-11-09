@@ -119,7 +119,12 @@ class WorkflowTests(unittest.TestCase):
         self.app.close()
 
     def call(self, method, path, payload=None):
-        return self.app.handle(method, path, payload or {})
+        payload = payload or {}
+        if method == "POST" and path in ("/api/settings", "/api/settings/test") and "expected" not in payload:
+            # Existing workflow fixtures act as a freshly loaded client. Stale/absent
+            # identity behavior is tested separately without this convenience helper.
+            payload = {**payload, "expected": self.app.store.settings()}
+        return self.app.handle(method, path, payload)
 
     def configure(self, **values):
         return self.call("POST", "/api/settings", {

@@ -7,6 +7,7 @@ import threading
 import uuid
 
 from .common import AppError, encode_json, utc_now
+from .provider import model_identity
 from .store import SYSTEM_FIELDS
 
 
@@ -71,10 +72,7 @@ def provider_metadata(target, result, started_at, completed_at, demo=False):
     metadata = {"base_url": target["base_url"], "endpoint": target["endpoint"],
                 "requested_model": target["model"], "actual_model": None,
                 "started_at": started_at, "completed_at": completed_at, "demo": demo}
-    # ProviderClient currently returns no model field. Preserve identity only if supplied.
-    actual = result.get("model")
-    if isinstance(actual, str) and 0 < len(actual) <= 256:
-        metadata["actual_model"] = actual
+    metadata["actual_model"] = model_identity(result.get("model"))
     for field in ("usage", "request_id"):
         if field in result:
             metadata[field] = result[field]

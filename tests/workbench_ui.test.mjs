@@ -120,6 +120,81 @@ test("workbench UI regressions", async t => {
     assert.equal(get("key").value, "");
   });
 
+  await t.test("settings load gates every action before any configuration is displayed", async () => {
+    const get = fakeDocument();
+    const {initSettings: initFresh, refreshSettings: refreshFresh} =
+      await import("../companion/static/settings.js?initial-settings-load");
+    let finishLoad;
+    const delayed = new Promise(resolve => { finishLoad = resolve; });
+    const posts = [];
+    const settings = {base_url: "https://a.invalid/v1", model: "alias", persist_key: false, key_present: true};
+    globalThis.fetch = async (_path, options = {}) => {
+      if (!options.body) return delayed;
+      posts.push(JSON.parse(options.body));
+      return reply({ok: true, settings});
+    };
+    initFresh();
+    const loading = refreshFresh();
+    for (const id of ["base-url", "model", "key", "persist-key", "settings-submit", "save-key", "delete-key", "test-key"])
+      assert.equal(get(id).disabled, true, id);
+    get("key").value = "unsaved-key";
+    await get("settings-form").emit("submit", {submitter: get("settings-submit")});
+    for (const id of ["save-key", "delete-key", "test-key"]) await get(id).emit("click");
+    assert.equal(posts.length, 0);
+    finishLoad(reply({ok: true, settings}));
+    await loading;
+    assert.equal(get("save-key").disabled, false);
+    assert.equal(get("settings-submit").disabled, false);
+  });
+
+  await t.test("stale settings retain Key and require explicit refresh then target confirmation", async () => {
+    const get = fakeDocument();
+    const {initSettings: initFresh, refreshSettings: refreshFresh} =
+      await import("../companion/static/settings.js?stale-settings");
+    const a = {base_url: "https://a.invalid/v1", model: "alias-a", persist_key: false};
+    const b = {base_url: "https://b.invalid/v1", model: "alias-b", persist_key: true};
+    let current = a;
+    const posts = [];
+    globalThis.fetch = async (path, options = {}) => {
+      if (!options.body) return reply({ok: true, settings: {...current, key_present: true}});
+      const payload = JSON.parse(options.body);
+      posts.push({path, payload});
+      if (JSON.stringify(payload.expected) !== JSON.stringify(current))
+        return reply({ok: false, error: {code: "settings_conflict"}}, 409);
+      if (path === "/api/settings/test")
+        return reply({ok: true, job: {id: "synthetic", state: "succeeded", result: {provider: {}}}});
+      return reply({ok: true, settings: {...current, key_present: true}});
+    };
+    initFresh();
+    await refreshFresh();
+    current = b;
+    get("key").value = "key-intended-for-a";
+    await get("save-key").emit("click");
+    assert.deepEqual(posts[0].payload.expected, a);
+    assert.equal(get("key").value, "key-intended-for-a");
+    assert.equal(get("base-url").value, a.base_url);
+    assert.equal(get("settings-submit").disabled, true);
+    for (const id of ["save-key", "delete-key", "test-key"]) await get(id).emit("click");
+    assert.equal(posts.length, 1);
+    await get("settings-refresh").emit("click");
+    assert.equal(get("base-url").value, b.base_url);
+    assert.equal(get("key").value, "key-intended-for-a");
+    assert.equal(get("settings-confirm").hidden, false);
+    assert.equal(get("save-key").disabled, true);
+    await get("save-key").emit("click");
+    assert.equal(posts.length, 1);
+    await get("settings-confirm").emit("click");
+    assert.equal(get("save-key").disabled, false);
+    await get("save-key").emit("click");
+    assert.deepEqual(posts[1].payload.expected, b);
+    assert.equal(get("key").value, "");
+    await get("delete-key").emit("click");
+    await get("test-key").emit("click");
+    await get("settings-form").emit("submit", {submitter: get("settings-submit")});
+    for (const post of posts.slice(1)) assert.deepEqual(post.payload.expected, b);
+    assert.equal(posts.length, 5);
+  });
+
   await t.test("form stays unavailable until the first complete profile arrives", async () => {
     const get = fakeDocument();
     const {initSystem: initFresh, refreshProfile: refreshFresh} =

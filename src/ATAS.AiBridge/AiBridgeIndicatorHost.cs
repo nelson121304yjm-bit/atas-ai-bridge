@@ -116,11 +116,11 @@ public partial class AiBridgeStrategy
         if (ChartInfo == null) return;
         try
         {
-            var area = ChartArea;
+            var area = WorkbenchArea;
             if (area.Width < 100 || area.Height < 40) return;
-            if (area.Width >= 160)
+            var button = WorkbenchButton(area);
+            if (!button.IsEmpty)
             {
-                var button = WorkbenchButton(area);
                 context.FillRectangle(Color.FromArgb(235, 25, 90, 102), button);
                 context.DrawString("打开 AI 工作台", _workbenchFont, Color.White,
                                    button.X + 10, button.Y + 6);
@@ -131,8 +131,8 @@ public partial class AiBridgeStrategy
                 var measured = context.MeasureString(text, _statusFont);
                 var width = Math.Min(area.Width - 16, (int)Math.Ceiling((double)measured.Width) + 20);
                 var height = Math.Max(28, (int)Math.Ceiling((double)measured.Height) + 12);
-                var y = area.Width >= 160 && area.X + 8 + width >= WorkbenchButton(area).X
-                    ? area.Y + 44 : area.Y + 8;
+                var y = button.IsEmpty ? area.Y + 8 : button.Bottom + 8;
+                if (y + height > area.Bottom - 8) return;
                 var box = new Rectangle(area.X + 8, y, width, height);
                 context.FillRectangle(Color.FromArgb(230, 20, 28, 40), box);
                 // The rectangle overload clips the text on the tested Retina host.
@@ -146,11 +146,17 @@ public partial class AiBridgeStrategy
         }
     }
 
+    // The price plot can be smaller than ChartArea (axes, panels and side tools).
+    // Use the SDK's plot coordinates for both drawing and mouse input; do not infer DPI.
+    private Rectangle WorkbenchArea => ChartInfo?.PriceChartContainer?.Region ?? Rectangle.Empty;
+
     private static Rectangle WorkbenchButton(Rectangle area) =>
-        new Rectangle(area.Right - 140, area.Y + 8, 132, 28);
+        area.Width >= 148 && area.Height >= 44
+            ? new Rectangle(area.X + 8, area.Y + 8, 132, 28)
+            : Rectangle.Empty;
 
     private static bool IsWorkbenchButtonHit(Rectangle area, int x, int y) =>
-        area.Width >= 160 && area.Height >= 40 && WorkbenchButton(area).Contains(x, y);
+        !WorkbenchButton(area).IsEmpty && WorkbenchButton(area).Contains(x, y);
 
     private bool ShouldConsumeWorkbenchMouseUp(bool insideButton)
     {
@@ -165,7 +171,7 @@ public partial class AiBridgeStrategy
         try
         {
             if (e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
-                ChartInfo != null && IsWorkbenchButtonHit(ChartArea, e.X, e.Y))
+                ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y))
             {
                 _workbenchPressed = true;
                 return true;
@@ -180,7 +186,7 @@ public partial class AiBridgeStrategy
         try
         {
             var insideButton = e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
-                ChartInfo != null && IsWorkbenchButtonHit(ChartArea, e.X, e.Y);
+                ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y);
             if (ShouldConsumeWorkbenchMouseUp(insideButton))
             {
                 if (Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) == 0)
@@ -203,7 +209,7 @@ public partial class AiBridgeStrategy
     {
         try
         {
-            if (e != null && ChartInfo != null && IsWorkbenchButtonHit(ChartArea, e.X, e.Y))
+            if (e != null && ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y))
                 return StdCursor.Hand;
         }
         catch { /* A chart callback must not propagate an optional UI error. */ }

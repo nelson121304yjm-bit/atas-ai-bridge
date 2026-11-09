@@ -71,6 +71,14 @@ def _validate_key(key):
         raise AppError("invalid_key", "Provider key is invalid.")
 
 
+def model_identity(value):
+    """Keep only a complete, bounded provider identity; never infer an alias."""
+    if (isinstance(value, str) and 1 <= len(value) <= 256 and value == value.strip()
+            and value.isprintable()):
+        return value
+    return None
+
+
 class ProviderClient:
     def complete(self, base_url: str, model: str, key: str, messages: list) -> dict:
         base_url = normalize_base_url(base_url)
@@ -121,6 +129,9 @@ class ProviderClient:
                 ValueError) as exc:
             raise AppError("invalid_provider_response", "Provider response is invalid.", 502) from None
         result = {"text": content}
+        actual_model = model_identity(parsed.get("model"))
+        if actual_model is not None:
+            result["model"] = actual_model
         if "usage" in parsed:
             if not isinstance(parsed["usage"], dict):
                 raise AppError("invalid_provider_response", "Provider response is invalid.", 502)

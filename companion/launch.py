@@ -18,6 +18,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from companion.server import private_state  # noqa: E402
+from companion.instance import BUSY_MESSAGE, process_is_alive, state_is_owned  # noqa: E402
 
 
 DEFAULT_STATE = Path.home() / "Library" / "Application Support" / "ATAS AI Review"
@@ -66,18 +67,25 @@ def issue_url(directory: Path, bridge_port: int | None = None) -> str:
         url = _issue(metadata, bridge_port) if metadata else None
         if url:
             return url
+        if state_is_owned(directory) or (metadata and process_is_alive(metadata.get("pid"))):
+            raise RuntimeError(BUSY_MESSAGE)
         args = [sys.executable, "-m", "companion.server", "--state-dir", str(directory)]
         if bridge_port is not None:
             args.extend(["--bridge-port", str(bridge_port)])
-        subprocess.Popen(args, cwd=Path(__file__).resolve().parents[1],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, start_new_session=True)
-        for _ in range(100):
+        child = subprocess.Popen(args, cwd=Path(__file__).resolve().parents[1],
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                 stderr=subprocess.DEVNULL, start_new_session=True)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
             time.sleep(0.05)
             metadata = _read_runtime(directory)
             url = _issue(metadata, bridge_port) if metadata else None
             if url:
                 return url
+            if child.poll() is not None:
+                break
+        if state_is_owned(directory) or (metadata and process_is_alive(metadata.get("pid"))):
+            raise RuntimeError(BUSY_MESSAGE)
         raise RuntimeError("本地工作台未能启动，请检查端口 8770–8780。")
     finally:
         os.close(descriptor)
@@ -101,7 +109,10 @@ def main() -> None:
     arguments = parser.parse_args()
     if arguments.bridge_port is not None and not 1 <= arguments.bridge_port <= 65535:
         parser.error("--bridge-port must be in 1..65535")
-    url = issue_url(arguments.state_dir, arguments.bridge_port)
+    try:
+        url = issue_url(arguments.state_dir, arguments.bridge_port)
+    except RuntimeError as error:
+        raise SystemExit(str(error)) from None
     if arguments.url_file:
         _write_url(arguments.url_file, url)
     elif not webbrowser.open(url):

@@ -43,9 +43,32 @@ else
     var hit = type.GetMethod("IsWorkbenchButtonHit", BindingFlags.Static | BindingFlags.NonPublic);
     Check(hit != null, "chart button hit test exists");
     var chart = new System.Drawing.Rectangle(10, 20, 500, 300);
-    Check((bool)hit!.Invoke(null, new object[] { chart, 390, 30 })!, "button accepts inside click");
-    Check(!(bool)hit.Invoke(null, new object[] { chart, 100, 30 })!, "button ignores chart clicks");
-    Check(!(bool)hit.Invoke(null, new object[] { chart, 390, 100 })!, "button ignores clicks below it");
+    Check((bool)hit!.Invoke(null, new object[] { chart, 30, 30 })!, "left button accepts inside click");
+    Check(!(bool)hit.Invoke(null, new object[] { chart, 390, 30 })!, "button ignores chart clicks");
+    Check(!(bool)hit.Invoke(null, new object[] { chart, 30, 100 })!, "button ignores clicks below it");
+    var geometry = type.GetMethod("WorkbenchButton", BindingFlags.Static | BindingFlags.NonPublic);
+    Check(geometry != null, "render and hit-test share bounded button geometry");
+    foreach (var plot in new[] { chart, new System.Drawing.Rectangle(80, 140, 2350, 1200),
+                                new System.Drawing.Rectangle(20, 30, 148, 44) })
+    {
+        var button = (System.Drawing.Rectangle)geometry!.Invoke(null, new object[] { plot })!;
+        Check(button == new System.Drawing.Rectangle(plot.X + 8, plot.Y + 8, 132, 28),
+              "button anchors at safe plot left without DPI assumptions");
+        Check(plot.Contains(button), "entire button remains inside price plot bounds");
+        Check((bool)hit.Invoke(null, new object[] { plot, button.X + 1, button.Y + 1 })!,
+              "rendered button and clickable region agree");
+        Check(!(bool)hit.Invoke(null, new object[] { plot, button.Right, button.Bottom })!,
+              "outside bottom-right edge is not clickable");
+    }
+    foreach (var plot in new[] { new System.Drawing.Rectangle(80, 140, 147, 100),
+                                new System.Drawing.Rectangle(80, 140, 500, 43),
+                                System.Drawing.Rectangle.Empty })
+    {
+        Check(((System.Drawing.Rectangle)geometry!.Invoke(null, new object[] { plot })!).IsEmpty,
+              "insufficient plot area suppresses button instead of clipping its label");
+        Check(!(bool)hit.Invoke(null, new object[] { plot, plot.X + 10, plot.Y + 10 })!,
+              "hidden narrow-chart button cannot consume mouse input");
+    }
 
     // Avoid constructing ATAS UI/services. These rejection paths must fail closed
     // before they access any SDK state or mutable instance collections.
