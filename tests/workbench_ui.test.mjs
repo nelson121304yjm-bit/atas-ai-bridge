@@ -120,6 +120,42 @@ test("workbench UI regressions", async t => {
     assert.equal(get("key").value, "");
   });
 
+  await t.test("form stays unavailable until the first complete profile arrives", async () => {
+    const get = fakeDocument();
+    const {initSystem: initFresh, refreshProfile: refreshFresh} =
+      await import("../companion/static/system.js?initial-load-test");
+    let finishLoad;
+    const delayed = new Promise(resolve => { finishLoad = resolve; });
+    const posts = [];
+    const initial = profile("initial-system", "initial-prompt", "Saved system", "Saved prompt");
+    initial.system.data.entry = "Existing entry rule";
+    globalThis.fetch = async (path, options = {}) => {
+      assert.equal(path, "/api/profile");
+      if (!options.body) return delayed;
+      posts.push(JSON.parse(options.body));
+      return reply({ok: true, profile: initial});
+    };
+    initFresh();
+    const loading = refreshFresh();
+    assert.equal(get("sys-name").disabled, true);
+    assert.equal(get("sys-entry").disabled, true);
+    assert.equal(get("sys-prompt").disabled, true);
+    assert.equal(get("profile-save").disabled, true);
+    await get("profile-form").emit("submit");
+    assert.equal(posts.length, 0);
+    finishLoad(reply({ok: true, profile: initial}));
+    await loading;
+    assert.equal(get("sys-name").value, "Saved system");
+    assert.equal(get("sys-entry").value, "Existing entry rule");
+    assert.equal(get("sys-prompt").value, "Saved prompt");
+    assert.equal(get("sys-entry").disabled, false);
+    assert.equal(get("profile-save").disabled, false);
+    assert.match(get("profile-message").textContent, /已载入/);
+    await get("profile-form").emit("submit");
+    assert.equal(posts[0].system.entry, "Existing entry rule");
+    assert.deepEqual(posts[0].expected, {system: "initial-system", prompt: "initial-prompt"});
+  });
+
   await t.test("accepted profile refresh preserves old draft baseline until explicit merge", async () => {
     const get = fakeDocument();
     let current = profile("old-system", "old-prompt", "Old", "Old prompt");

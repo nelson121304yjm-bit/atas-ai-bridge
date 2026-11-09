@@ -9,6 +9,8 @@ let recovery = null;
 let recoveryMessage = null;
 let mergeButton = null;
 let saveButton = null;
+let editableFields = [];
+let ready = false;
 
 const versionIds = value => ({system: value.system.id, prompt: value.prompt.id});
 
@@ -20,7 +22,7 @@ function currentVersionChanged() {
 function updateRecovery() {
   const changed = currentVersionChanged();
   recovery.hidden = !changed;
-  saveButton.disabled = !profile || changed;
+  saveButton.disabled = !ready || !profile || changed;
   if (changed) {
     recoveryMessage.textContent = draftDirty
       ? "当前版本已变化。未保存草稿仍基于旧版本；请展开版本记录核对并手动合并，或明确载入当前版本。"
@@ -58,12 +60,21 @@ function renderHistory(value) {
 }
 
 export async function refreshProfile(fill = true) {
-  const response = await api("/api/profile");
+  let response;
+  try { response = await api("/api/profile"); }
+  catch (error) {
+    if (!ready) setText("profile-message", "系统档案尚未载入，表单不可编辑。请刷新页面重试。");
+    throw error;
+  }
+  const firstLoad = !ready;
   profile = response.profile;
-  if (fill && !draftDirty) fillForm(profile);
+  if (firstLoad || (fill && !draftDirty)) fillForm(profile);
   else if (!draftBase) draftBase = versionIds(profile);
   renderHistory(profile);
+  ready = true;
+  editableFields.forEach(field => { field.disabled = false; });
   updateRecovery();
+  if (firstLoad) setText("profile-message", "当前系统与指令版本已载入。");
   return profile;
 }
 
@@ -71,6 +82,9 @@ export function initSystem() {
   const form = byId("profile-form");
   saveButton = form.querySelector("button[type=submit]");
   saveButton.disabled = true;
+  editableFields = [...fields.map(name => byId(`sys-${name}`)), byId("sys-prompt")];
+  editableFields.forEach(field => { field.disabled = true; });
+  setText("profile-message", "正在载入系统档案…");
   recovery = node("div", "callout"); recovery.hidden = true;
   recovery.id = "profile-recovery";
   recoveryMessage = node("p", "");
@@ -84,20 +98,23 @@ export function initSystem() {
   actions.append(loadButton, mergeButton);
   recovery.append(recoveryMessage, actions);
   form.append(recovery);
-  for (const field of [...fields.map(name => `sys-${name}`), "sys-prompt"]) {
-    byId(field).addEventListener("input", () => { draftDirty = true; updateRecovery(); });
+  for (const field of editableFields) {
+    field.addEventListener("input", () => { if (!ready) return; draftDirty = true; updateRecovery(); });
   }
   loadButton.addEventListener("click", () => {
+    if (!ready) return;
     fillForm(profile);
     setText("profile-message", "已明确载入当前系统与指令版本，原草稿已替换。");
   });
   mergeButton.addEventListener("click", () => {
+    if (!ready) return;
     draftBase = versionIds(profile);
     updateRecovery();
     setText("profile-message", "已确认手动合并并更新编辑基准。请核对草稿后再保存新版本。");
   });
   byId("profile-form").addEventListener("submit", async event => {
     event.preventDefault();
+    if (!ready) return;
     if (currentVersionChanged()) { updateRecovery(); return; }
     const button = saveButton; button.disabled = true;
     try {
