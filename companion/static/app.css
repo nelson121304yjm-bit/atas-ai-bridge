@@ -1,0 +1,8 @@
+:root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; }
+body { margin: 0; background: #f4f6f7; color: #17242a; }
+main { max-width: 760px; margin: 64px auto; padding: 0 24px; }
+h1 { font-size: 28px; margin-bottom: 12px; }
+#service { color: #24545e; }
+section { margin-top: 36px; border-top: 1px solid #c8d1d5; padding-top: 20px; }
+h2 { font-size: 19px; }
+section p { line-height: 1.6; color: #4f6269; }

@@ -3,15 +3,20 @@ namespace ATAS.AiBridge;
 
 using System;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
+using System.Threading.Tasks;
 using ATAS.DataFeedsCore;
 using ATAS.Indicators;
 using OFT.Rendering.Context;
+using OFT.Rendering.Control;
 using OFT.Rendering.Tools;
+using OFT.Rendering;
 
 public partial class AiBridgeStrategy
 {
@@ -20,7 +25,11 @@ public partial class AiBridgeStrategy
     private long _lastSnapshotTicks;
     private long _lastMarketEventTicks;
     private readonly RenderFont _statusFont = new RenderFont("Arial", 12);
+    private readonly RenderFont _workbenchFont = new RenderFont("Arial", 12);
     private bool _renderErrorLogged;
+    private bool _workbenchPressed;
+    private int _workbenchLaunching;
+    private volatile string _workbenchMessage;
     private Portfolio Portfolio => TradingManager?.Portfolio;
     private bool IsActivated => _hostRunning;
 
@@ -29,11 +38,14 @@ public partial class AiBridgeStrategy
     {
         get
         {
-            if (!_hostRunning) return _hostStatus;
+            if (!_hostRunning)
+                return _workbenchMessage == null ? _hostStatus :
+                    (_hostStatus ?? "AI Bridge") + " | " + _workbenchMessage;
             var now = DateTime.UtcNow.Ticks;
             var age = AgeMilliseconds(Interlocked.Read(ref _lastMarketEventTicks), now);
             var state = age == null ? "waiting live tick" : age > 5000 ? "stale" : "receiving data";
-            return "AI Bridge | READ ONLY | :" + (_server?.Port ?? 0) + " | " + state;
+            var status = "AI Bridge | READ ONLY | :" + (_server?.Port ?? 0) + " | " + state;
+            return _workbenchMessage == null ? status : status + " | " + _workbenchMessage;
         }
     }
 
@@ -101,25 +113,135 @@ public partial class AiBridgeStrategy
 
     protected override void OnRender(RenderContext context, DrawingLayouts layout)
     {
-        if (!ShowBridgeStatus || ChartInfo == null) return;
+        if (ChartInfo == null) return;
         try
         {
             var area = ChartArea;
             if (area.Width < 100 || area.Height < 40) return;
-            var text = BridgeStatus;
-            var measured = context.MeasureString(text, _statusFont);
-            var width = Math.Min(area.Width - 16, (int)Math.Ceiling((double)measured.Width) + 20);
-            var height = Math.Max(28, (int)Math.Ceiling((double)measured.Height) + 12);
-            var box = new Rectangle(area.X + 8, area.Y + 8, width, height);
-            context.FillRectangle(Color.FromArgb(230, 20, 28, 40), box);
-            // The rectangle overload clips the text on the tested Retina host.
-            // Use the measured background and point overload for the glyphs.
-            context.DrawString(text, _statusFont, Color.White, box.X + 10, box.Y + 6);
+            if (area.Width >= 160)
+            {
+                var button = WorkbenchButton(area);
+                context.FillRectangle(Color.FromArgb(235, 25, 90, 102), button);
+                context.DrawString("打开 AI 工作台", _workbenchFont, Color.White,
+                                   button.X + 10, button.Y + 6);
+            }
+            if (ShowBridgeStatus)
+            {
+                var text = BridgeStatus;
+                var measured = context.MeasureString(text, _statusFont);
+                var width = Math.Min(area.Width - 16, (int)Math.Ceiling((double)measured.Width) + 20);
+                var height = Math.Max(28, (int)Math.Ceiling((double)measured.Height) + 12);
+                var y = area.Width >= 160 && area.X + 8 + width >= WorkbenchButton(area).X
+                    ? area.Y + 44 : area.Y + 8;
+                var box = new Rectangle(area.X + 8, y, width, height);
+                context.FillRectangle(Color.FromArgb(230, 20, 28, 40), box);
+                // The rectangle overload clips the text on the tested Retina host.
+                context.DrawString(text, _statusFont, Color.White, box.X + 10, box.Y + 6);
+            }
         }
         catch (Exception ex)
         {
             if (!_renderErrorLogged) Log("Status label: " + ex.Message);
             _renderErrorLogged = true;
+        }
+    }
+
+    private static Rectangle WorkbenchButton(Rectangle area) =>
+        new Rectangle(area.Right - 140, area.Y + 8, 132, 28);
+
+    private static bool IsWorkbenchButtonHit(Rectangle area, int x, int y) =>
+        area.Width >= 160 && area.Height >= 40 && WorkbenchButton(area).Contains(x, y);
+
+    public override bool ProcessMouseDown(RenderControlMouseEventArgs e)
+    {
+        try
+        {
+            if (e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
+                ChartInfo != null && IsWorkbenchButtonHit(ChartArea, e.X, e.Y))
+            {
+                _workbenchPressed = true;
+                return true;
+            }
+        }
+        catch (Exception ex) { _workbenchMessage = "工作台按钮不可用: " + ex.Message; }
+        return false;
+    }
+
+    public override bool ProcessMouseUp(RenderControlMouseEventArgs e)
+    {
+        var wasPressed = _workbenchPressed;
+        _workbenchPressed = false;
+        try
+        {
+            if (e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
+                ChartInfo != null && IsWorkbenchButtonHit(ChartArea, e.X, e.Y))
+            {
+                if (wasPressed && Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) == 0)
+                {
+                    _workbenchMessage = "正在打开工作台";
+                    _ = Task.Run(LaunchWorkbench);
+                }
+                return true;
+            }
+        }
+        catch (Exception ex) { _workbenchMessage = "工作台按钮不可用: " + ex.Message; }
+        return false;
+    }
+
+    public override StdCursor GetCursor(RenderControlMouseEventArgs e)
+    {
+        try
+        {
+            if (e != null && ChartInfo != null && IsWorkbenchButtonHit(ChartArea, e.X, e.Y))
+                return StdCursor.Hand;
+        }
+        catch { /* A chart callback must not propagate an optional UI error. */ }
+        return base.GetCursor(e);
+    }
+
+    private void LaunchWorkbench()
+    {
+        try
+        {
+            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var metadataPath = Path.Combine(appData, "ATAS AI Review", "installation.json");
+            if (!File.Exists(metadataPath))
+            {
+                _workbenchMessage = "未安装工作台；运行 install-workbench.sh --install";
+                return;
+            }
+            using var metadata = JsonDocument.Parse(File.ReadAllText(metadataPath));
+            var python = metadata.RootElement.GetProperty("python").GetString();
+            var launcher = metadata.RootElement.GetProperty("launcher").GetString();
+            if (string.IsNullOrWhiteSpace(python) || string.IsNullOrWhiteSpace(launcher) ||
+                !Path.IsPathFullyQualified(python) || !Path.IsPathFullyQualified(launcher) ||
+                !File.Exists(python) || !File.Exists(launcher))
+            {
+                _workbenchMessage = "工作台安装路径无效；重新运行 install-workbench.sh --install";
+                return;
+            }
+            var start = new ProcessStartInfo(python) { UseShellExecute = false, CreateNoWindow = true };
+            start.ArgumentList.Add(launcher);
+            start.ArgumentList.Add("--open");
+            var bridgePort = _server?.Port ?? 0;
+            if (bridgePort > 0)
+            {
+                start.ArgumentList.Add("--bridge-port");
+                start.ArgumentList.Add(bridgePort.ToString(CultureInfo.InvariantCulture));
+            }
+            using var process = Process.Start(start);
+            if (process == null || !process.WaitForExit(10000) || process.ExitCode != 0)
+                _workbenchMessage = "工作台启动失败；检查浏览器或重新安装";
+            else
+                _workbenchMessage = "工作台已打开";
+        }
+        catch (Exception ex)
+        {
+            _workbenchMessage = "工作台启动失败: " + ex.Message;
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _workbenchLaunching, 0);
         }
     }
 

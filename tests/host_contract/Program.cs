@@ -36,10 +36,26 @@ else
     Check(type.GetProperty("AllowTrading")?.SetMethod == null, "trading cannot be enabled on an indicator");
     Check(type.GetProperty("TradeToken")?.SetMethod == null, "indicator cannot accept a trade token");
     Check(type.GetProperty("BridgeStatus")?.PropertyType == typeof(string), "visible status property exists");
+    var mouseFlags = flags | BindingFlags.Public;
+    foreach (var name in new[] { "ProcessMouseDown", "ProcessMouseUp", "GetCursor" })
+        Check(type.GetMethod(name, mouseFlags)?.DeclaringType == type,
+              name + " must be handled by the indicator chart button");
+    var hit = type.GetMethod("IsWorkbenchButtonHit", BindingFlags.Static | BindingFlags.NonPublic);
+    Check(hit != null, "chart button hit test exists");
+    var chart = new System.Drawing.Rectangle(10, 20, 500, 300);
+    Check((bool)hit!.Invoke(null, new object[] { chart, 390, 30 })!, "button accepts inside click");
+    Check(!(bool)hit.Invoke(null, new object[] { chart, 100, 30 })!, "button ignores chart clicks");
+    Check(!(bool)hit.Invoke(null, new object[] { chart, 390, 100 })!, "button ignores clicks below it");
 
     // Avoid constructing ATAS UI/services. These rejection paths must fail closed
     // before they access any SDK state or mutable instance collections.
     var host = RuntimeHelpers.GetUninitializedObject(type);
+    var cursorMethod = type.GetMethod("GetCursor", mouseFlags)!;
+    var defaultCursor = cursorMethod.Invoke(host, new object?[] { null });
+    Check(defaultCursor != null, "cursor callback handles absent mouse data");
+    type.GetField("_workbenchMessage", flags)!.SetValue(host, "Workbench setup required");
+    Check((((string?)type.GetProperty("BridgeStatus")!.GetValue(host)) ?? "").Contains("Workbench setup required"),
+          "workbench installation status remains visible while bridge is unavailable");
     var handler = type.GetMethod("HandleRequest", flags)!;
     var waitingJson = (string)handler.Invoke(host, new object[] {
         "GET", "/api/quote", new Dictionary<string, string>(), "" })!;

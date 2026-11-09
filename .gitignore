@@ -13,6 +13,9 @@ bin/
 
 # ATAS runtime / local state
 AiBridge.port
+ATAS AI Review/
+.workbench-state/
+*.workbench-url
 
 # Secrets (never commit)
 .env
