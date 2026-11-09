@@ -50,6 +50,20 @@ else
     // Avoid constructing ATAS UI/services. These rejection paths must fail closed
     // before they access any SDK state or mutable instance collections.
     var host = RuntimeHelpers.GetUninitializedObject(type);
+    var mouseSequence = type.GetMethod("ShouldConsumeWorkbenchMouseUp", flags);
+    Check(mouseSequence != null, "mouse release sequence helper exists");
+    var pressed = type.GetField("_workbenchPressed", flags)!;
+    pressed.SetValue(host, false); // press began elsewhere
+    Check(!(bool)mouseSequence!.Invoke(host, new object[] { true })!,
+          "release over button after outside press must reach chart");
+    pressed.SetValue(host, true); // press began inside
+    Check((bool)mouseSequence.Invoke(host, new object[] { true })!,
+          "press and release inside button is consumed");
+    Check(!(bool)pressed.GetValue(host)!, "mouse release resets pressed state");
+    pressed.SetValue(host, true);
+    Check(!(bool)mouseSequence.Invoke(host, new object[] { false })!,
+          "release outside button after inside press reaches chart");
+    Check(!(bool)pressed.GetValue(host)!, "outside release resets pressed state");
     var cursorMethod = type.GetMethod("GetCursor", mouseFlags)!;
     var defaultCursor = cursorMethod.Invoke(host, new object?[] { null });
     Check(defaultCursor != null, "cursor callback handles absent mouse data");

@@ -35,6 +35,10 @@ class InstallTests(unittest.TestCase):
             self.assertIn("--open", user_launcher.read_text())
             self.assertIn("--state-dir", user_launcher.read_text())
             self.assertIn(str(state), user_launcher.read_text())
+            self.assertIn("chart button", result.stdout.lower())
+            help_result = subprocess.run(["/bin/bash", str(ROOT / "install-workbench.sh"),
+                                          "--help"], capture_output=True, text=True)
+            self.assertIn("chart button", help_result.stdout.lower())
 
 
 if __name__ == "__main__":

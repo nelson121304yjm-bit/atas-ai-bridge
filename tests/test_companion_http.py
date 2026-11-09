@@ -15,15 +15,18 @@ class HttpTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
+        self.state_dir = Path(temporary.name)
         self.calls = []
 
         def handler(method, path, payload):
             self.calls.append((method, path, payload))
             if path == "/api/error":
                 raise AppError("sample", "expected failure", 409)
+            if path == "/api/crash":
+                raise RuntimeError("sensitive-value-must-not-be-logged")
             return {"method": method, "path": path, "payload": payload}
 
-        self.server = make_server(handler, Path(temporary.name), port=0)
+        self.server = make_server(handler, self.state_dir, port=0)
         self.addCleanup(self.server.server_close)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
@@ -135,6 +138,60 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(status, 409)
         self.assertEqual(json.loads(body), {"ok": False, "error": {
             "code": "sample", "message": "expected failure"}})
+
+    def test_unexpected_handler_error_writes_private_redacted_diagnostic(self):
+        _, headers, _ = self.bootstrap()
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        status, _, body = self.request("GET", "/api/crash?secret=path-value",
+                                       headers={"Cookie": cookie})
+        self.assertEqual(status, 500)
+        self.assertEqual(json.loads(body)["error"]["code"], "internal_error")
+        diagnostic = self.state_dir / "errors.log"
+        self.assertEqual(diagnostic.stat().st_mode & 0o777, 0o600)
+        content = diagnostic.read_text()
+        self.assertIn("RuntimeError", content)
+        self.assertNotIn("sensitive-value-must-not-be-logged", content)
+        self.assertNotIn("path-value", content)
+        self.assertNotIn("/api/crash", content)
+
+    def test_launcher_port_update_is_authenticated_and_validated(self):
+        updates = []
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        server = make_server(lambda *_: {}, Path(temporary.name), port=0,
+                             on_bridge_port_change=updates.append)
+        self.addCleanup(server.server_close)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+
+        def issue(value, token):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+            connection.request("POST", "/__launcher/issue",
+                               body=json.dumps(value), headers={
+                                   "Content-Type": "application/json",
+                                   "X-Launcher-Token": token})
+            response = connection.getresponse()
+            status, body = response.status, response.read()
+            connection.close()
+            return status, body
+
+        self.assertEqual(issue({"bridge_port": 34000}, "wrong")[0], 401)
+        self.assertEqual(updates, [])
+        for invalid in (0, 65536, True, "34000"):
+            with self.subTest(invalid=invalid):
+                self.assertEqual(issue({"bridge_port": invalid},
+                                       server.auth.control_token)[0], 400)
+        self.assertEqual(updates, [])
+        status, body = issue({"bridge_port": 34000}, server.auth.control_token)
+        self.assertEqual(status, 200, body)
+        self.assertTrue(json.loads(body)["token"])
+        self.assertEqual(server.bridge_port, 34000)
+        self.assertEqual(updates, [34000])
+        self.assertEqual(issue({"bridge_port": 34000}, server.auth.control_token)[0], 200)
+        self.assertEqual(issue({}, server.auth.control_token)[0], 200)
+        self.assertEqual(updates, [34000])
 
 
 if __name__ == "__main__":

@@ -8,6 +8,9 @@ Usage: bash install-workbench.sh --install [--python PATH] [--state-dir PATH]
 
 Writes a private launcher and installation metadata. This does not install
 the ATAS indicator; use build.sh --install separately after quitting ATAS.
+The chart button reads installation metadata only from the default state
+directory. --state-dir creates a launcher for manual use or isolated tests;
+it does not move the chart button's installation metadata lookup.
 EOF
 }
 fail() { printf 'Error: %s\n' "$*" >&2; exit 1; }
@@ -53,4 +56,8 @@ with user_launcher.open("w", encoding="utf-8") as file:
                shlex.quote(str(launcher)) + " --open --state-dir " +
                shlex.quote(str(state)) + " \"$@\"\n")
 print("Workbench launcher installed: " + str(user_launcher))
+default_state = Path.home() / "Library" / "Application Support" / "ATAS AI Review"
+if state != default_state.resolve():
+    print("Custom state directory: open this launcher manually; the ATAS chart button "
+          "reads the default installation directory only.")
 PY

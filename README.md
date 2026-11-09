@@ -67,6 +67,7 @@ atas-ai-bridge/
 bash build.sh                   # 只构建，不修改 ATAS
 # 退出 ATAS 后再显式安装（旧插件会先备份）：
 bash build.sh --install
+bash install-workbench.sh --install  # 安装本地工作台启动器；不重启 ATAS
 bash mcp/setup-venv.sh           # 建独立 venv，输出 MCP 客户端配置
 ```
 
@@ -76,6 +77,10 @@ Mac 使用 **AI Bridge — read only 指标**：在图表的指标列表添加�
 不使用下文的 Windows 图表策略启动按钮。指标显示连接状态，仅提供行情读取；
 不包含下单实现，HTTP 设置写入和账户订单/持仓接口也被拒绝。
 MCP 会从 macOS 的 Application Support 目录自动发现桥端口。
+图表上的“打开 AI 工作台”按钮从默认的
+`~/Library/Application Support/ATAS AI Review/installation.json` 读取启动路径。
+`install-workbench.sh --state-dir PATH` 仅为手动启动或隔离测试创建自定义状态目录；
+图表按钮仍读取默认位置。
 完整步骤、端口配置、回退和验证范围见 [macOS 指南](docs/macos.md)。
 
 ### Windows（原有流程）

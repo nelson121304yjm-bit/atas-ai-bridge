@@ -34,14 +34,18 @@ def _read_runtime(directory: Path) -> dict | None:
     return None
 
 
-def _issue(metadata: dict) -> str | None:
+def _issue(metadata: dict, bridge_port: int | None) -> str | None:
     connection = http.client.HTTPConnection("127.0.0.1", metadata["port"], timeout=1)
     try:
-        connection.request("POST", "/__launcher/issue", headers={
-            "X-Launcher-Token": metadata["control_token"]})
+        body = json.dumps({"bridge_port": bridge_port} if bridge_port is not None else {})
+        connection.request("POST", "/__launcher/issue", body=body, headers={
+            "X-Launcher-Token": metadata["control_token"],
+            "Content-Type": "application/json"})
         response = connection.getresponse()
-        if response.status != 200:
+        if response.status == 401:
             return None
+        if response.status != 200:
+            raise RuntimeError(f"本地工作台无法更新桥接端口 (HTTP {response.status})。")
         token = json.loads(response.read())["token"]
         return f"http://127.0.0.1:{metadata['port']}/#token={quote(token)}"
     except (OSError, ValueError, KeyError, http.client.HTTPException):
@@ -59,7 +63,7 @@ def issue_url(directory: Path, bridge_port: int | None = None) -> str:
         os.fchmod(descriptor, 0o600)
         fcntl.flock(descriptor, fcntl.LOCK_EX)
         metadata = _read_runtime(directory)
-        url = _issue(metadata) if metadata else None
+        url = _issue(metadata, bridge_port) if metadata else None
         if url:
             return url
         args = [sys.executable, "-m", "companion.server", "--state-dir", str(directory)]
@@ -71,7 +75,7 @@ def issue_url(directory: Path, bridge_port: int | None = None) -> str:
         for _ in range(100):
             time.sleep(0.05)
             metadata = _read_runtime(directory)
-            url = _issue(metadata) if metadata else None
+            url = _issue(metadata, bridge_port) if metadata else None
             if url:
                 return url
         raise RuntimeError("本地工作台未能启动，请检查端口 8770–8780。")

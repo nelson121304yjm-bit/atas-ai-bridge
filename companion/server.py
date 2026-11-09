@@ -33,16 +33,24 @@ def write_private(path: Path, value: bytes) -> None:
 
 def serve(state_dir: Path, bridge_port: int | None = None) -> None:
     directory = private_state(state_dir)
+    bridge_state = {"port": bridge_port}
+    runtime_path = directory / "runtime.json"
 
     def handler(method, path, payload):
         if method == "GET" and path == "/api/status":
             return {"ok": True, "service": "running", "configured": False,
-                    "bridgePort": bridge_port}
+                    "bridgePort": bridge_state["port"]}
         raise AppError("not_found", "接口尚未开放。", 404)
+
+    def on_bridge_port_change(value: int) -> None:
+        metadata["bridge_port"] = value
+        write_private(runtime_path, json.dumps(metadata).encode("utf-8"))
+        bridge_state["port"] = value
 
     for port in range(8770, 8781):
         try:
-            server = make_server(handler, directory, port=port)
+            server = make_server(handler, directory, port=port,
+                                 on_bridge_port_change=on_bridge_port_change)
             break
         except OSError:
             continue
@@ -51,7 +59,7 @@ def serve(state_dir: Path, bridge_port: int | None = None) -> None:
 
     metadata = {"pid": os.getpid(), "port": server.server_address[1],
                 "control_token": server.auth.control_token, "bridge_port": bridge_port}
-    runtime_path = directory / "runtime.json"
+    server.bridge_port = bridge_port
     write_private(runtime_path, json.dumps(metadata).encode("utf-8"))
 
     def stop(_number, _frame):

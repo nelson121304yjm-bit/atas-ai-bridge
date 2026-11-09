@@ -152,8 +152,16 @@ public partial class AiBridgeStrategy
     private static bool IsWorkbenchButtonHit(Rectangle area, int x, int y) =>
         area.Width >= 160 && area.Height >= 40 && WorkbenchButton(area).Contains(x, y);
 
+    private bool ShouldConsumeWorkbenchMouseUp(bool insideButton)
+    {
+        var consume = _workbenchPressed && insideButton;
+        _workbenchPressed = false;
+        return consume;
+    }
+
     public override bool ProcessMouseDown(RenderControlMouseEventArgs e)
     {
+        _workbenchPressed = false;
         try
         {
             if (e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
@@ -169,14 +177,13 @@ public partial class AiBridgeStrategy
 
     public override bool ProcessMouseUp(RenderControlMouseEventArgs e)
     {
-        var wasPressed = _workbenchPressed;
-        _workbenchPressed = false;
         try
         {
-            if (e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
-                ChartInfo != null && IsWorkbenchButtonHit(ChartArea, e.X, e.Y))
+            var insideButton = e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
+                ChartInfo != null && IsWorkbenchButtonHit(ChartArea, e.X, e.Y);
+            if (ShouldConsumeWorkbenchMouseUp(insideButton))
             {
-                if (wasPressed && Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) == 0)
+                if (Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) == 0)
                 {
                     _workbenchMessage = "正在打开工作台";
                     _ = Task.Run(LaunchWorkbench);
@@ -184,7 +191,11 @@ public partial class AiBridgeStrategy
                 return true;
             }
         }
-        catch (Exception ex) { _workbenchMessage = "工作台按钮不可用: " + ex.Message; }
+        catch (Exception ex)
+        {
+            _workbenchPressed = false;
+            _workbenchMessage = "工作台按钮不可用: " + ex.Message;
+        }
         return false;
     }
 

@@ -6,13 +6,14 @@ from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import secrets
 import threading
 import time
 from urllib.parse import urlsplit
 
-from .common import AppError, encode_json
+from .common import AppError, encode_json, utc_now
 
 
 MAX_BODY = 196608
@@ -65,11 +66,29 @@ class Auth:
             return value, record[0]
 
 
-def make_server(handler, state_dir: Path, port: int = 0) -> ThreadingHTTPServer:
-    """Return an HTTPServer bound exclusively to IPv4 loopback."""
+def make_server(handler, state_dir: Path, port: int = 0,
+                on_bridge_port_change=None) -> ThreadingHTTPServer:
+    """Bind loopback; the optional hook receives authenticated port changes."""
     state_dir = Path(state_dir)
+    state_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(state_dir, 0o700)
     assets = Path(__file__).resolve().parent / "static"
     auth = Auth()
+    bridge_change_lock = threading.Lock()
+
+    def record_internal_error(exc: Exception) -> None:
+        # Never persist an exception message, request target, headers or body.
+        line = f"{utc_now()} internal_error {type(exc).__name__}\n".encode("utf-8")
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(state_dir / "errors.log", flags, 0o600)
+            try:
+                os.fchmod(descriptor, 0o600)
+                os.write(descriptor, line)
+            finally:
+                os.close(descriptor)
+        except OSError:
+            pass  # Diagnostic failure must not replace the API's generic 500.
 
     class RequestHandler(BaseHTTPRequestHandler):
         server_version = "ATASReview/1"
@@ -142,6 +161,17 @@ def make_server(handler, state_dir: Path, port: int = 0) -> ThreadingHTTPServer:
                 if not secrets.compare_digest(self.headers.get("X-Launcher-Token", ""),
                                               auth.control_token):
                     raise AppError("unauthorized", "启动器认证失败。", 401)
+                update = self._payload() if self.headers.get("Content-Length") else {}
+                if update:
+                    value = update.get("bridge_port")
+                    if (set(update) != {"bridge_port"} or type(value) is not int
+                            or not 1 <= value <= 65535):
+                        raise AppError("invalid_bridge_port", "桥接端口无效。", 400)
+                    with bridge_change_lock:
+                        if value != self.server.bridge_port:
+                            if on_bridge_port_change is not None:
+                                on_bridge_port_change(value)
+                            self.server.bridge_port = value
                 self._json(200, {"token": auth.issue_launch()})
                 return
             if path == "/api/bootstrap" and method == "POST":
@@ -172,7 +202,8 @@ def make_server(handler, state_dir: Path, port: int = 0) -> ThreadingHTTPServer:
                 self._serve()
             except AppError as error:
                 self._error(error)
-            except Exception:
+            except Exception as exc:
+                record_internal_error(exc)
                 self._error(AppError("internal_error", "服务暂时不可用。", 500))
 
         do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = _dispatch
@@ -181,4 +212,5 @@ def make_server(handler, state_dir: Path, port: int = 0) -> ThreadingHTTPServer:
     server.daemon_threads = True
     server.auth = auth
     server.state_dir = state_dir
+    server.bridge_port = None
     return server
