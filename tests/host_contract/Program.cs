@@ -101,6 +101,14 @@ else
         Check(freshness.GetProperty("snapshotStale").GetBoolean(), "unobserved data must be stale");
         Check(freshness.GetProperty("marketEventStale").GetBoolean(), "unobserved market events must be stale");
     }
+    var builtStatus = (string)type.GetMethod("BuildStatus", flags)!.Invoke(host, null)!;
+    using (var status = JsonDocument.Parse(builtStatus))
+    {
+        Check(status.RootElement.TryGetProperty("chartType", out _),
+              "indicator status exposes actual chart type");
+        Check(status.RootElement.TryGetProperty("timeFrame", out _),
+              "indicator status exposes actual chart timeframe");
+    }
     foreach (var field in new[] { "_lastSnapshotTicks", "_lastMarketEventTicks" })
         type.GetField(field, flags)!.SetValue(host, DateTime.UtcNow.AddSeconds(-10).Ticks);
     using (var status = Status())
