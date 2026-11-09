@@ -131,18 +131,20 @@ POST /api/demo
 - [x] System form supports optional fields, editable prompt and previous version list. Journal lists real optional data and disconnected state, select closed trade for preview. Never show demo trades as actual journal entries.
 - [x] Installer optional journal path arguments write private config only; discover no private keys. Provide a desktop-friendly launcher and uninstall/rollback instructions. Keep all private states out of public commits.
 - [x] Use Ego Lite skill for real browser interactions with a temporary-state/fake-provider test server: bootstrap, save settings, connection test, version edit, preview→analyze→followup, proposal conflict/accept/reject, demo labels, errors and reload. Screenshot at 320,768,1024,1440 widths and inspect screenshots. No real external model requests.
-- [ ] Compile/install updated indicator with backup, verify visible entry in ATAS and launch (hand off only exact clicks if automation cannot operate it). Verify local real status and journal list without sending records to a model. Commit.
+- [x] Compile/install updated indicator with backup, verify visible entry in ATAS and launch (hand off only exact clicks if automation cannot operate it). Verify local real status and journal list without sending records to a model. Commit.
 
 ## Task 6: Final review, documentation and delivery
 
 **Files:** `README.md`, `docs/macos.md`, new `docs/workbench.md`, plan checkboxes and validation record.
 
-- [ ] Review aggregate diff against approved spec, resolve substantive findings with tests. Do not claim commercial-grade or full supplier support from mocks.
-- [ ] Run `rtk proxy mcp/.venv/bin/python -m unittest discover -s tests -v`, Mac Release build and host contract, legacy conditional build and contract, JS syntax checks. Verify no vendor DLL, key, state DB, account record or screenshot is staged.
+- [x] Review aggregate diff against approved spec, resolve substantive findings with tests. Do not claim commercial-grade or full supplier support from mocks.
+- [x] Run `rtk proxy mcp/.venv/bin/python -m unittest discover -s tests -v`, Mac Release build and host contract, legacy conditional build and contract, JS syntax checks. Verify no vendor DLL, key, state DB, account record or screenshot is staged.
 - [x] Document launch/setup, provider data destination, Keychain/session behavior, analysis limitations, optional journal integration, recovery, tested versions and unverified real provider calls. Update plan outcomes.
-- [ ] Push source/tests/docs to the already-authorized existing fork branch and verify `git ls-remote` matches HEAD. Leave installed workbench usable at model settings; user enters their own key when ready.
+- [x] Push source/tests/docs to the already-authorized existing fork branch and verify `git ls-remote` matches HEAD. Leave installed workbench usable at model settings; user enters their own key when ready.
 
-截至 2026-11-09：Task 1–4 的代码／契约与 Task 5 的 UI、安装器及合成浏览器流程已完成。
-默认安装的 0.4.0-macos.1 指标尚未在新图表完成入口与实时采集验收；
-Task 5 最后一项及 Task 6 的最终复核、发布检查和推送继续保持未完成。
+截至 2026-11-09：代码／契约、UI、安装、真实实时采集和只读日志连接已完成；
+最终 Python 133、UI 7、Mac 指标契约 71、旧策略契约 2 通过，代码复核问题已关闭。
+原生按钮完整显示已确认；自动点击工具返回 noWindowsAvailable，用户已实际点击并确认打开工作台。
+Task 5 已完成；用户另提出改进按钮位置及内置窗口需求，作为后续范围单独设计。
+Task 6 的交付包含现有 fork 分支推送及远端 SHA 核对；不创建上游 PR。
 真实付费模型未验证。详见 `docs/validation/2026-11-09-workbench.md`。
