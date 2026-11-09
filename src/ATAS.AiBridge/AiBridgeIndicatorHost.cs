@@ -26,6 +26,7 @@ public partial class AiBridgeStrategy
     private long _lastMarketEventTicks;
     private readonly RenderFont _statusFont = new RenderFont("Arial", 12);
     private readonly RenderFont _workbenchFont = new RenderFont("Arial", 12);
+    private const string WorkbenchButtonLabel = "AI Review";
     private bool _renderErrorLogged;
     private bool _workbenchPressed;
     private int _workbenchLaunching;
@@ -122,7 +123,7 @@ public partial class AiBridgeStrategy
             if (!button.IsEmpty)
             {
                 context.FillRectangle(Color.FromArgb(235, 25, 90, 102), button);
-                context.DrawString("打开 AI 工作台", _workbenchFont, Color.White,
+                context.DrawString(WorkbenchButtonLabel, _workbenchFont, Color.White,
                                    button.X + 10, button.Y + 6);
             }
             if (ShowBridgeStatus)
@@ -151,8 +152,8 @@ public partial class AiBridgeStrategy
     private Rectangle WorkbenchArea => ChartInfo?.PriceChartContainer?.Region ?? Rectangle.Empty;
 
     private static Rectangle WorkbenchButton(Rectangle area) =>
-        area.Width >= 148 && area.Height >= 44
-            ? new Rectangle(area.X + 8, area.Y + 8, 132, 28)
+        area.Width >= 236 && area.Height >= 56
+            ? new Rectangle(area.X + 8, area.Y + 8, 220, 40)
             : Rectangle.Empty;
 
     private static bool IsWorkbenchButtonHit(Rectangle area, int x, int y) =>
@@ -177,7 +178,7 @@ public partial class AiBridgeStrategy
                 return true;
             }
         }
-        catch (Exception ex) { _workbenchMessage = "工作台按钮不可用: " + ex.Message; }
+        catch (Exception) { _workbenchMessage = "Workbench button unavailable"; }
         return false;
     }
 
@@ -191,16 +192,16 @@ public partial class AiBridgeStrategy
             {
                 if (Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) == 0)
                 {
-                    _workbenchMessage = "正在打开工作台";
+                    _workbenchMessage = "Opening workbench";
                     _ = Task.Run(LaunchWorkbench);
                 }
                 return true;
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             _workbenchPressed = false;
-            _workbenchMessage = "工作台按钮不可用: " + ex.Message;
+            _workbenchMessage = "Workbench button unavailable";
         }
         return false;
     }
@@ -224,7 +225,7 @@ public partial class AiBridgeStrategy
             var metadataPath = Path.Combine(appData, "ATAS AI Review", "installation.json");
             if (!File.Exists(metadataPath))
             {
-                _workbenchMessage = "未安装工作台；运行 install-workbench.sh --install";
+                _workbenchMessage = "Workbench not installed; run install-workbench.sh --install";
                 return;
             }
             using var metadata = JsonDocument.Parse(File.ReadAllText(metadataPath));
@@ -234,7 +235,7 @@ public partial class AiBridgeStrategy
                 !Path.IsPathFullyQualified(python) || !Path.IsPathFullyQualified(launcher) ||
                 !File.Exists(python) || !File.Exists(launcher))
             {
-                _workbenchMessage = "工作台安装路径无效；重新运行 install-workbench.sh --install";
+                _workbenchMessage = "Invalid workbench paths; run install-workbench.sh --install";
                 return;
             }
             var start = new ProcessStartInfo(python) { UseShellExecute = false, CreateNoWindow = true };
@@ -248,13 +249,13 @@ public partial class AiBridgeStrategy
             }
             using var process = Process.Start(start);
             if (process == null || !process.WaitForExit(10000) || process.ExitCode != 0)
-                _workbenchMessage = "工作台启动失败；检查浏览器或重新安装";
+                _workbenchMessage = "Workbench unavailable; retry shortly or check installation/browser";
             else
-                _workbenchMessage = "工作台已打开";
+                _workbenchMessage = "Workbench opened";
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _workbenchMessage = "工作台启动失败: " + ex.Message;
+            _workbenchMessage = "Workbench launch failed; check installation/browser";
         }
         finally
         {

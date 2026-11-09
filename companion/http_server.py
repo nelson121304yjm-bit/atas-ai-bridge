@@ -17,6 +17,7 @@ from .common import AppError, encode_json, utc_now
 
 
 MAX_BODY = 196608
+REQUEST_IDLE_SECONDS = 2
 ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/bootstrap.js": ("bootstrap.js", "text/javascript; charset=utf-8"),
@@ -100,6 +101,9 @@ def make_server(handler, state_dir: Path, port: int = 0,
     class RequestHandler(BaseHTTPRequestHandler):
         server_version = "ATASReview/1"
         sys_version = ""
+        # StreamRequestHandler applies this only to socket I/O, not business/job
+        # execution. Idle preconnects and incomplete bodies must not pin shutdown.
+        timeout = REQUEST_IDLE_SECONDS
 
         def log_message(self, format, *args):
             pass  # URLs may carry private bootstrap material in fragments.
@@ -147,6 +151,9 @@ def make_server(handler, state_dir: Path, port: int = 0,
                 raise AppError("invalid_content_type", "需要 JSON 请求。", 415)
             try:
                 value = json.loads(self.rfile.read(length).decode("utf-8"))
+            except TimeoutError:
+                self.close_connection = True
+                raise AppError("request_timeout", "本机请求接收超时；未执行该请求。", 408) from None
             except (UnicodeDecodeError, json.JSONDecodeError):
                 raise AppError("invalid_json", "JSON 格式无效。", 400) from None
             if not isinstance(value, dict):

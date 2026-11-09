@@ -48,11 +48,14 @@ else
     Check(!(bool)hit.Invoke(null, new object[] { chart, 30, 100 })!, "button ignores clicks below it");
     var geometry = type.GetMethod("WorkbenchButton", BindingFlags.Static | BindingFlags.NonPublic);
     Check(geometry != null, "render and hit-test share bounded button geometry");
+    var label = type.GetField("WorkbenchButtonLabel", BindingFlags.Static | BindingFlags.NonPublic);
+    Check(label?.GetRawConstantValue() as string == "AI Review",
+          "native entry uses readable ASCII with the installed Arial font");
     foreach (var plot in new[] { chart, new System.Drawing.Rectangle(80, 140, 2350, 1200),
-                                new System.Drawing.Rectangle(20, 30, 148, 44) })
+                                new System.Drawing.Rectangle(20, 30, 236, 56) })
     {
         var button = (System.Drawing.Rectangle)geometry!.Invoke(null, new object[] { plot })!;
-        Check(button == new System.Drawing.Rectangle(plot.X + 8, plot.Y + 8, 132, 28),
+        Check(button == new System.Drawing.Rectangle(plot.X + 8, plot.Y + 8, 220, 40),
               "button anchors at safe plot left without DPI assumptions");
         Check(plot.Contains(button), "entire button remains inside price plot bounds");
         Check((bool)hit.Invoke(null, new object[] { plot, button.X + 1, button.Y + 1 })!,
@@ -60,8 +63,8 @@ else
         Check(!(bool)hit.Invoke(null, new object[] { plot, button.Right, button.Bottom })!,
               "outside bottom-right edge is not clickable");
     }
-    foreach (var plot in new[] { new System.Drawing.Rectangle(80, 140, 147, 100),
-                                new System.Drawing.Rectangle(80, 140, 500, 43),
+    foreach (var plot in new[] { new System.Drawing.Rectangle(80, 140, 235, 100),
+                                new System.Drawing.Rectangle(80, 140, 500, 55),
                                 System.Drawing.Rectangle.Empty })
     {
         Check(((System.Drawing.Rectangle)geometry!.Invoke(null, new object[] { plot })!).IsEmpty,

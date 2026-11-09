@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import socket
 import subprocess
 import sys
 import tempfile
@@ -195,6 +196,20 @@ class SlowWorkbench(Workbench):
                 wait_for("release-control")
         super().set_bridge_port(port)
 server.Workbench = SlowWorkbench
+original_make_server = server.make_server
+def observed_server(*args, **kwargs):
+    instance = original_make_server(*args, **kwargs)
+    handler = instance.RequestHandlerClass
+    setup, payload = handler.setup, handler._payload
+    def observed_setup(self):
+        setup(self)
+        (state / ("accepted-" + str(self.client_address[1]))).touch()
+    def observed_payload(self):
+        (state / ("body-read-" + str(self.client_address[1]))).touch()
+        return payload(self)
+    handler.setup, handler._payload = observed_setup, observed_payload
+    return instance
+server.make_server = observed_server
 server.serve(state, 34000)
 '''
 
@@ -349,6 +364,45 @@ class LifetimeOwnerTests(unittest.TestCase):
         (self.state / "release-provider").touch()
         self.assertEqual(owner.wait(3), 0)
         self.assertEqual(self.launch().returncode, 0)
+
+    def assert_shutdown_with_unfinished_request(self, body=False):
+        owner = self.spawn(OWNER_SCRIPT)
+        self.wait_until(lambda: self.runtime()["pid"] == owner.pid)
+        metadata = self.runtime()
+        peer = socket.create_connection(("127.0.0.1", metadata["port"]), timeout=3)
+        self.addCleanup(peer.close)
+        client_port = peer.getsockname()[1]
+        self.wait_until(lambda: (self.state / ("accepted-" + str(client_port))).exists())
+        if body:
+            peer.sendall(("POST /api/bootstrap HTTP/1.1\r\n"
+                          f"Host: 127.0.0.1:{metadata['port']}\r\n"
+                          "Content-Type: application/json\r\nContent-Length: 128\r\n\r\n{").encode())
+            self.wait_until(lambda: (self.state / ("body-read-" + str(client_port))).exists())
+        owner.terminate()
+        try:
+            code = owner.wait(4)
+        except subprocess.TimeoutExpired:
+            self.fail("An accepted idle/incomplete request blocked shutdown while its peer stayed open")
+        self.assertEqual(code, 0)
+        self.assertFalse((self.state / "runtime.json").exists())
+        self.assertFalse((self.state / "provider-calls").exists())
+        self.assertFalse((self.state / "errors.log").exists())
+        received = peer.recv(4096)
+        if body:
+            self.assertTrue(received.startswith(b"HTTP/1.0 408"), "incomplete JSON receives a safe timeout response")
+            while received:
+                received = peer.recv(4096)
+        self.assertEqual(received, b"", "server must close its side of the unfinished request")
+        # Deliberately leave peer open: ownership release must not depend on client cleanup.
+        completed = self.launch()
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertNotEqual(self.runtime()["pid"], owner.pid)
+
+    def test_shutdown_bounds_accepted_idle_browser_connection(self):
+        self.assert_shutdown_with_unfinished_request()
+
+    def test_shutdown_bounds_incomplete_json_body(self):
+        self.assert_shutdown_with_unfinished_request(body=True)
 
 
 if __name__ == "__main__":
