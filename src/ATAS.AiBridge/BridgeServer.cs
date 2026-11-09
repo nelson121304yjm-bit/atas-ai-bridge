@@ -37,6 +37,15 @@ internal sealed class BridgeServer
     }
 
     public int Port { get; private set; }
+    public bool IsListening
+    {
+        get
+        {
+            var listener = _listener;
+            var cancellation = _cts;
+            return listener != null && cancellation != null && !cancellation.IsCancellationRequested && listener.Server.IsBound;
+        }
+    }
 
     /// <summary>在 [firstPort, lastPort] 里找第一个可用端口并开始监听。</summary>
     public bool Start(int firstPort, int lastPort, out string error)

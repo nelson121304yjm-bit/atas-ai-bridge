@@ -57,8 +57,16 @@ internal static class ReviewLaunch
 {
     internal const int MaxOutput = 2048;
 
+    internal static void RequireBridgePort(int bridgePort)
+    {
+        if (bridgePort <= 0 || bridgePort > 65535)
+            throw new InvalidOperationException("A live originating bridge port is required. Apply enabled indicator settings and check Bridge status.");
+    }
+
     internal static Task<ReviewLaunchResult> InstalledAsync(int bridgePort, CancellationToken cancellation)
     {
+        RequireBridgePort(bridgePort);
+        cancellation.ThrowIfCancellationRequested();
         var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
                                 "ATAS AI Review", "installation.json");
         if (!File.Exists(path))
@@ -84,6 +92,8 @@ internal static class ReviewLaunch
     internal static async Task<ReviewLaunchResult> RunAsync(string python, string launcher, int bridgePort,
                                                           CancellationToken cancellation, TimeSpan timeout)
     {
+        RequireBridgePort(bridgePort);
+        cancellation.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo(python)
         {
             UseShellExecute = false, CreateNoWindow = true,
@@ -91,11 +101,8 @@ internal static class ReviewLaunch
         };
         start.ArgumentList.Add(launcher);
         start.ArgumentList.Add("--native-json");
-        if (bridgePort > 0)
-        {
-            start.ArgumentList.Add("--bridge-port");
-            start.ArgumentList.Add(bridgePort.ToString(CultureInfo.InvariantCulture));
-        }
+        start.ArgumentList.Add("--bridge-port");
+        start.ArgumentList.Add(bridgePort.ToString(CultureInfo.InvariantCulture));
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         deadline.CancelAfter(timeout);
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Workbench launcher could not start.");

@@ -97,6 +97,137 @@ else
           "settings get/set or restore cannot launch the review");
 
     var staticFlags = BindingFlags.Static | BindingFlags.NonPublic;
+    // A settings action must reject an unbound origin before scheduling launch.
+    // These are real indicator instances with inert SDK construction bypassed;
+    // no subprocess, ATAS UI, provider or trade is involved in these paths.
+    var capturePort = type.GetMethod("CaptureReviewBridgePort", flags);
+    Check(capturePort != null, "native opening requires an originating live bridge port");
+    var requestOpen = type.GetMethod("RequestOpenReview", flags)!;
+    foreach (var state in new[] { "uninitialized", "disabled", "listener failed", "no listener" })
+    {
+        var origin = RuntimeHelpers.GetUninitializedObject(type);
+        type.GetField("_bridgeEnabled", flags)!.SetValue(origin, state != "disabled");
+        type.GetField("_reviewRegistered", flags)!.SetValue(origin, state != "uninitialized");
+        type.GetField("_hostRunning", flags)!.SetValue(origin, state == "no listener");
+        requestOpen.Invoke(origin, null);
+        Check((int)type.GetField("_workbenchLaunching", flags)!.GetValue(origin)! == 0,
+              state + " origin cannot schedule a launcher or dock mutation");
+        var guidance = (string?)type.GetField("_workbenchMessage", flags)!.GetValue(origin);
+        Check(guidance?.Contains("Apply", StringComparison.OrdinalIgnoreCase) == true &&
+              guidance.Contains("Bridge status", StringComparison.OrdinalIgnoreCase),
+              state + " origin explains apply/enable and bridge-status recovery");
+    }
+    var bridgeType = assembly.GetType("ATAS.AiBridge.BridgeServer", true)!;
+    var requestHandlerType = bridgeType.GetNestedType("RequestHandler")!;
+    var fixtureHandler = Delegate.CreateDelegate(requestHandlerType,
+        typeof(ContractBridgeFixture).GetMethod(nameof(ContractBridgeFixture.Reply))!);
+    object NewBridge() => Activator.CreateInstance(bridgeType, new object[] { fixtureHandler, (Action<string>)(_ => { }) })!;
+    var sources = new[] { NewBridge(), NewBridge() };
+    try
+    {
+        var ports = new List<int>();
+        foreach (var source in sources)
+        {
+            var probe = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            probe.Start();
+            var port = ((System.Net.IPEndPoint)probe.LocalEndpoint).Port;
+            probe.Stop();
+            var startArgs = new object?[] { port, port, null };
+            Check((bool)bridgeType.GetMethod("Start")!.Invoke(source, startArgs)!, "isolated originating bridge listens on its assigned port");
+            ports.Add(port);
+        }
+        Check(ports[0] != ports[1], "origin fixtures have distinct live chart ports");
+        var origin = RuntimeHelpers.GetUninitializedObject(type);
+        type.GetField("_bridgeEnabled", flags)!.SetValue(origin, true);
+        type.GetField("_reviewRegistered", flags)!.SetValue(origin, true);
+        type.GetField("_hostRunning", flags)!.SetValue(origin, true);
+        type.GetField("_server", flags)!.SetValue(origin, sources[0]);
+        var captured = (int)capturePort!.Invoke(origin, null)!;
+        Check(captured == ports[0], "native request captures only its originating chart's positive port");
+        var validateSource = type.GetMethod("ValidateReviewSource", flags)!;
+        validateSource.Invoke(origin, new object[] { sources[0], captured });
+        type.GetField("_server", flags)!.SetValue(origin, sources[1]);
+        try { validateSource.Invoke(origin, new object[] { sources[0], captured }); Check(false, "changed source cannot silently retarget another chart"); }
+        catch (TargetInvocationException error) { Check(error.InnerException is InvalidOperationException, "changed source is rejected before launch"); }
+        type.GetField("_server", flags)!.SetValue(origin, sources[0]);
+        bridgeType.GetMethod("Stop")!.Invoke(sources[0], null);
+        try { capturePort.Invoke(origin, null); Check(false, "stopped listener cannot reuse its old positive port"); }
+        catch (TargetInvocationException error) { Check(error.InnerException is InvalidOperationException, "stopped listener is rejected despite its retained port"); }
+    }
+    finally { foreach (var source in sources) bridgeType.GetMethod("Stop")!.Invoke(source, null); }
+
+    // Execute the production GUI lifetime guard with a deterministic dispatcher.
+    // The queue pauses after the worker check, before the GUI action executes.
+    var lifetimeType = assembly.GetType("ATAS.AiBridge.ReviewDockLifetime", true)!;
+    var retainOwner = lifetimeType.GetMethod("Retain", flags)!;
+    var releaseOwner = lifetimeType.GetMethod("Release", flags)!;
+    var checkOwner = lifetimeType.GetMethod("Check", flags)!;
+    var invokeUi = lifetimeType.GetMethod("InvokeAsync", flags)!;
+    async Task Canceled(Task task)
+    {
+        try { await task; Check(false, "stale queued GUI work must be canceled"); }
+        catch (OperationCanceledException) { Check(true, "stale queued GUI work is canceled inside dispatch"); }
+    }
+    foreach (var stage in new[] { "create/activate", "bind", "begin" })
+    {
+        var queue = new ContractUiQueue();
+        var subscriptions = 0;
+        var mutations = 0;
+        var detached = 0;
+        var lifetime = Activator.CreateInstance(lifetimeType, flags, null,
+            new object[] { (Func<Action, Task>)queue.Dispatch, (Action)(() => { subscriptions = 0; detached++; }) }, null)!;
+        var owner = retainOwner.Invoke(lifetime, null)!;
+        // "begin" starts with an already-published binding and four subscriptions.
+        if (stage == "begin")
+        {
+            var bind = (Task)invokeUi.Invoke(lifetime, new object[] { owner, CancellationToken.None,
+                (Action)(() => subscriptions = 4) })!;
+            queue.Run(0); await bind;
+        }
+        checkOwner.Invoke(lifetime, new object[] { owner, CancellationToken.None });
+        var pending = (Task)invokeUi.Invoke(lifetime, new object[] { owner, CancellationToken.None,
+            (Action)(() => { mutations++; if (stage == "bind") subscriptions = 4; }) })!;
+        var release = (Task)releaseOwner.Invoke(lifetime, new[] { owner })!;
+        queue.Run(1); await release; // last-owner cleanup wins before queued GUI work
+        queue.Run(0); await Canceled(pending);
+        Check(mutations == 0, "disposed origin cannot run queued " + stage);
+        Check(subscriptions == 0 && detached == 1,
+              "last release leaves no binding or event subscriptions after " + stage);
+    }
+    {
+        var queue = new ContractUiQueue();
+        var detachCount = 0;
+        var mutations = 0;
+        var lifetime = Activator.CreateInstance(lifetimeType, flags, null,
+            new object[] { (Func<Action, Task>)queue.Dispatch, (Action)(() => detachCount++) }, null)!;
+        var oldOwner = retainOwner.Invoke(lifetime, null)!;
+        var liveOwner = retainOwner.Invoke(lifetime, null)!;
+        var stale = (Task)invokeUi.Invoke(lifetime, new object[] { oldOwner, CancellationToken.None,
+            (Action)(() => mutations++) })!;
+        await (Task)releaseOwner.Invoke(lifetime, new[] { oldOwner })!;
+        queue.Run(0); await Canceled(stale);
+        var live = (Task)invokeUi.Invoke(lifetime, new object[] { liveOwner, CancellationToken.None,
+            (Action)(() => mutations++) })!;
+        queue.Run(0); await live;
+        Check(mutations == 1 && detachCount == 0, "disposing one indicator preserves another live owner's usable binding");
+        using var cancellation = new CancellationTokenSource();
+        checkOwner.Invoke(lifetime, new object[] { liveOwner, cancellation.Token });
+        var canceled = (Task)invokeUi.Invoke(lifetime, new object[] { liveOwner, cancellation.Token,
+            (Action)(() => mutations++) })!;
+        cancellation.Cancel(); queue.Run(0); await Canceled(canceled);
+        Check(mutations == 1, "request cancellation is rechecked inside queued GUI work");
+        var release = (Task)releaseOwner.Invoke(lifetime, new[] { liveOwner })!;
+        var newOwner = retainOwner.Invoke(lifetime, null)!;
+        queue.Run(0); await release;
+        var oldGeneration = (Task)invokeUi.Invoke(lifetime, new object[] { liveOwner, CancellationToken.None,
+            (Action)(() => mutations++) })!;
+        queue.Run(0); await Canceled(oldGeneration);
+        Check(detachCount == 0 && mutations == 1, "newly retained owner cannot revive an earlier released request");
+        var finalRelease = (Task)releaseOwner.Invoke(lifetime, new[] { newOwner })!;
+        queue.Run(0); await finalRelease;
+        Check(detachCount == 1, "final live owner release detaches exactly once");
+    }
+
     var resultType = assembly.GetType("ATAS.AiBridge.ReviewLaunchResult", true)!;
     var parse = resultType.GetMethod("Parse", staticFlags)!;
     var rootUrl = resultType.GetMethod("IsRootUrl", staticFlags)!;
@@ -182,7 +313,15 @@ else
                 Check(!ex.Message.Contains(syntheticToken), "launcher exception never echoes pipe credentials");
             }
         }
-        await Run("import json; print(json.dumps({'url':'http://127.0.0.1:8770/','token':'" + syntheticToken + "'}))", TimeSpan.FromSeconds(3), true);
+        var marker = Path.Combine(scratch, "started");
+        foreach (var invalidPort in new[] { 0, -1, 65536 })
+        {
+            File.WriteAllText(script, "from pathlib import Path; Path(" + JsonSerializer.Serialize(marker) + ").touch()");
+            var invalid = (Task)runLauncher.Invoke(null, new object[] { python, script, invalidPort, CancellationToken.None, TimeSpan.FromSeconds(3) })!;
+            try { await invalid; Check(false, "native launcher requires a positive originating port"); }
+            catch (InvalidOperationException) { Check(!File.Exists(marker), "invalid port is rejected before starting any subprocess"); }
+        }
+        await Run("import json,sys; assert sys.argv[1:] == ['--native-json','--bridge-port','8790']; print(json.dumps({'url':'http://127.0.0.1:8770/','token':'" + syntheticToken + "'}))", TimeSpan.FromSeconds(3), true);
         await Run("print('malformed synthetic output')", TimeSpan.FromSeconds(3), false);
         await Run("import sys; sys.exit(1)", TimeSpan.FromSeconds(3), false);
         await Run("print('x' * 2049)", TimeSpan.FromSeconds(3), false);
@@ -274,3 +413,27 @@ else
     finally { File.Delete(temp); }
 }
 Console.WriteLine($"PASS: {args[2]} host contract ({checks} checks)");
+
+sealed class ContractUiQueue
+{
+    private readonly List<(Action Action, TaskCompletionSource<bool> Completion)> _pending = new();
+    internal Task Dispatch(Action action)
+    {
+        var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _pending.Add((action, completion));
+        return completion.Task;
+    }
+    internal void Run(int index)
+    {
+        var work = _pending[index];
+        _pending.RemoveAt(index);
+        try { work.Action(); work.Completion.SetResult(true); }
+        catch (OperationCanceledException) { work.Completion.SetCanceled(); }
+        catch (Exception error) { work.Completion.SetException(error); }
+    }
+}
+
+static class ContractBridgeFixture
+{
+    public static string Reply(string method, string path, Dictionary<string, string> query, string body) => "{}";
+}

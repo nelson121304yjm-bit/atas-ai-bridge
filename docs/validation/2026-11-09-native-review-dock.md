@@ -12,8 +12,13 @@
   API 有宿主版本耦合，不宣称官方稳定插件协议；只引用本机 DLL，全部 `Private=false`。
 - 指标设置的 `Open AI review tab` 使用宿主支持的 `EditorAttribute -> Avalonia Control`。
   只有按钮 Click 执行动作；属性读取、写入、克隆或反序列化不启动后台。
+  只有已初始化、已启用且有实际监听器的当前指标可打开；请求捕获该实例的正数桥端口，
+  启动及各次 UI 操作前重新核对同一实例/端口，不回退到后台上次选择的图表。
+  不满足条件时先启用 **启用 AI 桥**、Apply 当前图表的指标设置，并检查 **Bridge status**。
 - 后台进程等待及管道读取在后台线程，dock/WebView 操作在 Avalonia UI 线程。
   打开请求全局串行，同一面板只有一组事件；超时/取消清理待发凭证，关闭或最后一个指标卸载时清理引用/事件。
+  每次排队的创建/激活、绑定和导航在 UI 执行时重新核对请求取消和唯一活跃所有者；
+  最后一个所有者卸载后，旧请求不能重新建立绑定，新指标也不能恢复旧请求。
   不关闭宿主面板、其他图表、采集器或已启动的 Python 服务。
 
 ## 原生认证协议
@@ -21,7 +26,7 @@
 `companion.launch --native-json` 的重定向 stdout 只有一个 JSON 对象：`url` 为
 `http://127.0.0.1:8770..8780/`，`token` 为短时一次性值。`--open` / `--url-file`
 保持原用途，三种模式互斥。原生管道限长 2048 字符、默认超时 10 秒，出错不打印 stdout/stderr。
-命令参数只有启动器路径、模式和可选桥端口。
+命令参数只有启动器路径、模式和必需的当前指标桥端口；无效端口在启动子进程前拒绝。
 
 精确根 URL 的成功 `NavigationCompleted` 后，宿主经 `PostWebMessageAsJson` 发送：
 
@@ -49,9 +54,9 @@
 |---|---|
 | Python 全量回归，`-W error::ResourceWarning` | 136 通过 |
 | 浏览器/原生消息 UI 回归 | 13 通过 |
-| 本机 installed SDK Mac indicator 构建 | 0 警告、0 错误 |
-| 实际 Mac DLL host contract | 128 检查通过 |
-| 同 SDK legacy 条件构建 | 0 警告、0 错误 |
+| 本机 installed SDK Mac indicator 构建 | 0 编译器警告、0 错误；存在已记录的环境 CSSM 诊断 |
+| 实际 Mac DLL host contract（含首轮审查修复） | 162 检查通过 |
+| 同 SDK legacy 条件构建 | 0 编译器警告、0 错误 |
 | 实际 legacy DLL host contract | 2 检查通过 |
 
 发布说明不得把编译或合成测试当作 ATAS dock 实机通过。
@@ -70,7 +75,9 @@
    用备份安装产物并按宿主要求重启/加载，保持这些设置。
 2. 从 BTCUSDT 图表的 **Indicators → AI Bridge — read only → 指标设置 → Open AI review tab** 点击按钮，
    确认产生真正的 **AI 复盘** 标签页，可由宿主停靠到图表旁；
-   核对四个中文模块可用及 `Bridge status (read only)` 的所属面板、无凭证 URL、认证成功状态。
+   核对四个中文模块可用、实际使用该图表的桥端口及 `Bridge status (read only)` 的所属面板、无凭证 URL、认证成功状态。
+   未初始化/禁用/监听失败的设置入口必须给出启用、Apply 与 Bridge status 指引，不得启动或改选后台源；
+   宿主若传入编辑副本，应先 Apply 并从实际运行指标入口验证，不得猜选其他图表。
 3. 重复打开只激活同一面板；关闭重开、后台复用、会话过期后显式重开恢复均可用。
    确认图上按钮/状态新实例默认关闭，没有默认快捷键。旧工作区已保存的
    **Show bridge status on chart=true** 继续生效；需要时由用户显式关闭，不强制覆盖原设置。

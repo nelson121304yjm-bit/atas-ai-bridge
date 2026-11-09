@@ -35,6 +35,7 @@ public partial class AiBridgeStrategy
     private ReviewOpenAction _reviewOpenAction;
     private volatile bool _indicatorDisposed;
     private bool _reviewRegistered;
+    private long _reviewOwner;
     private Portfolio Portfolio => TradingManager?.Portfolio;
     private bool IsActivated => _hostRunning;
 
@@ -89,7 +90,7 @@ public partial class AiBridgeStrategy
 
     protected override void OnInitialize()
     {
-        if (!_reviewRegistered) { ReviewDockHost.Retain(); _reviewRegistered = true; }
+        if (!_reviewRegistered) { _reviewOwner = ReviewDockHost.Retain(); _reviewRegistered = true; }
         if (_server != null) return;
         if (!BridgeEnabled) { _hostStatus = "Disabled in indicator settings."; return; }
         try
@@ -121,7 +122,7 @@ public partial class AiBridgeStrategy
     {
         _indicatorDisposed = true;
         _reviewCancellation.Cancel();
-        if (_reviewRegistered) { _reviewRegistered = false; ReviewDockHost.Release(); }
+        if (_reviewRegistered) { _reviewRegistered = false; ReviewDockHost.Release(_reviewOwner); }
         _hostRunning = false;
         UnsubscribeFromTimer(TimeSpan.FromSeconds(1), RedrawStatus);
         var port = _server?.Port ?? 0;
@@ -243,9 +244,33 @@ public partial class AiBridgeStrategy
 
     private void RequestOpenReview()
     {
-        if (_indicatorDisposed || Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) != 0) return;
+        int bridgePort;
+        try { bridgePort = CaptureReviewBridgePort(); }
+        catch (InvalidOperationException ex) { SetWorkbenchMessage(ex.Message); return; }
+        var source = _server;
+        var owner = _reviewOwner;
+        if (Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) != 0) return;
         SetWorkbenchMessage("Opening native AI review tab");
-        _ = Task.Run(LaunchWorkbench);
+        _ = Task.Run(() => LaunchWorkbench(bridgePort, owner, source));
+    }
+
+    private int CaptureReviewBridgePort()
+    {
+        const string guidance = "Enable AI bridge (启用 AI 桥), Apply the indicator settings on this chart, then check Bridge status before reopening AI review.";
+        if (_indicatorDisposed || !_reviewRegistered)
+            throw new InvalidOperationException("Originating indicator is not initialized. " + guidance);
+        if (!BridgeEnabled)
+            throw new InvalidOperationException("Originating bridge is disabled. " + guidance);
+        var source = _server;
+        if (!_hostRunning || source == null || !source.IsListening || source.Port <= 0)
+            throw new InvalidOperationException("Originating bridge has no live listener. " + guidance);
+        return source.Port;
+    }
+
+    private void ValidateReviewSource(BridgeServer source, int bridgePort)
+    {
+        if (CaptureReviewBridgePort() != bridgePort || !ReferenceEquals(source, _server))
+            throw new InvalidOperationException("Originating bridge changed. Apply enabled indicator settings and check Bridge status before reopening AI review.");
     }
 
     private void SetWorkbenchMessage(string message)
@@ -257,11 +282,13 @@ public partial class AiBridgeStrategy
         });
     }
 
-    private async Task LaunchWorkbench()
+    private async Task LaunchWorkbench(int bridgePort, long owner, BridgeServer source)
     {
         try
         {
-            SetWorkbenchMessage(await ReviewDockHost.OpenInstalledAsync(_server?.Port ?? 0, _reviewCancellation.Token));
+            ValidateReviewSource(source, bridgePort);
+            SetWorkbenchMessage(await ReviewDockHost.OpenInstalledAsync(bridgePort, owner,
+                () => ValidateReviewSource(source, bridgePort), _reviewCancellation.Token));
         }
         catch (OperationCanceledException) { SetWorkbenchMessage("AI review opening canceled."); }
         catch (InvalidOperationException ex)
