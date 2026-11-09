@@ -97,15 +97,18 @@ class ProviderClient:
                     raise AppError("provider_response_too_large", "Provider response exceeds 2 MiB.", 502)
                 request_header = response.headers.get("x-request-id")
         except HTTPError as exc:
-            if exc.code == 401:
-                raise AppError("provider_auth", "Provider rejected credentials.", 401) from None
-            if exc.code in (402, 403, 429) and _quota_error(exc):
-                raise AppError("provider_quota", "Provider quota is exhausted.", 402) from None
-            if exc.code == 429:
-                raise AppError("provider_rate_limited", "Provider rate limit reached.", 429) from None
-            if 300 <= exc.code < 400:
-                raise AppError("provider_redirect", "Provider redirect was rejected.", 502) from None
-            raise AppError("provider_http_error", "Provider request failed.", 502) from None
+            try:
+                if exc.code == 401:
+                    raise AppError("provider_auth", "Provider rejected credentials.", 401) from None
+                if exc.code in (402, 403, 429) and _quota_error(exc):
+                    raise AppError("provider_quota", "Provider quota is exhausted.", 402) from None
+                if exc.code == 429:
+                    raise AppError("provider_rate_limited", "Provider rate limit reached.", 429) from None
+                if 300 <= exc.code < 400:
+                    raise AppError("provider_redirect", "Provider redirect was rejected.", 502) from None
+                raise AppError("provider_http_error", "Provider request failed.", 502) from None
+            finally:
+                exc.close()
         except (URLError, TimeoutError, OSError) as exc:
             raise AppError("provider_unavailable", "Provider connection failed.", 502) from None
         try:

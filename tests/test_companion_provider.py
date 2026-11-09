@@ -1,11 +1,13 @@
 """Local fake provider protocol and injected credential storage."""
 
 import json
+import io
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 from companion.common import AppError
 from companion.credentials import CredentialVault
@@ -219,6 +221,27 @@ class CredentialTests(unittest.TestCase):
             with self.subTest(secret=secret), self.assertRaises(AppError) as caught:
                 self.vault.set(self.first, secret)
             self.assertNotIn(secret, caught.exception.message)
+
+
+class ProviderResponseOwnershipTests(unittest.TestCase):
+    def test_http_error_response_is_closed_on_every_public_error_path(self):
+        cases = (
+            (401, b'{"error":{"message":"synthetic-secret"}}', "provider_auth"),
+            (429, b'{"error":{"code":"insufficient_quota"}}', "provider_quota"),
+            (429, b'{"error":{"code":"rate_limit_exceeded"}}', "provider_rate_limited"),
+            (302, b"redirect", "provider_redirect"),
+            (503, b"unavailable", "provider_http_error"),
+        )
+        for status, payload, expected_code in cases:
+            with self.subTest(status=status, expected_code=expected_code):
+                body = io.BytesIO(payload)
+                error = HTTPError("http://127.0.0.1:1/v1/chat/completions", status,
+                                  "synthetic error", {}, body)
+                with patch("companion.provider._open_no_redirect", side_effect=error):
+                    with self.assertRaises(AppError) as caught:
+                        ProviderClient().complete("http://127.0.0.1:1/v1", "m", "synthetic-key", [])
+                self.assertEqual(caught.exception.code, expected_code)
+                self.assertTrue(body.closed, "provider error response must be closed")
 
 
 if __name__ == "__main__":
