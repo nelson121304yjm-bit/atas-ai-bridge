@@ -43,6 +43,17 @@ def _target(settings):
             "endpoint": settings["base_url"] + "/chat/completions"}
 
 
+def _redact_credential(value, key):
+    if isinstance(value, str):
+        return value.replace(key, "[credential redacted]")
+    if isinstance(value, list):
+        return [_redact_credential(item, key) for item in value]
+    if isinstance(value, dict):
+        return {_redact_credential(name, key): _redact_credential(item, key)
+                for name, item in value.items()}
+    return value
+
+
 class Workbench:
     def __init__(self, state_dir, market=None, journal=None, provider=None, vault=None):
         self._lock = threading.RLock()
@@ -130,8 +141,7 @@ class Workbench:
                 self.vault.set(merged["base_url"], payload["key"], persist=merged["persist_key"])
             elif payload.get("delete_key"):
                 self.vault.delete(merged["base_url"])
-            elif ("persist_key" in payload and merged["persist_key"] != current["persist_key"]
-                  and merged["base_url"]):
+            elif "persist_key" in payload and merged["base_url"]:
                 existing = self.vault.get(merged["base_url"])
                 if existing:
                     self.vault.set(merged["base_url"], existing, persist=merged["persist_key"])
@@ -187,15 +197,7 @@ class Workbench:
     def _complete(self, target, request, key, started_at):
         result = self.provider.complete(target["base_url"], target["model"], key, request["messages"])
         # Keys must not enter report strings even if a nonconforming provider echoes one.
-        def redact(value):
-            if isinstance(value, str):
-                return value.replace(key, "[credential redacted]")
-            if isinstance(value, list):
-                return [redact(item) for item in value]
-            if isinstance(value, dict):
-                return {redact(name): redact(item) for name, item in value.items()}
-            return value
-        result = redact(result)
+        result = _redact_credential(result, key)
         if not isinstance(result, dict) or not isinstance(result.get("text"), str):
             raise AppError("invalid_provider_response", "Provider response is invalid.", 502)
         return result, provider_metadata(target, result, started_at, utc_now())
@@ -264,6 +266,9 @@ class Workbench:
                 with self._lock:
                     if propose:
                         proposed = parse_proposal(result["text"])
+                        # JSON escape decoding can reveal a credential absent from the raw text.
+                        # Revalidate after redaction because replacements can change field lengths.
+                        proposed = parse_proposal(encode_json(_redact_credential(proposed, key)).decode("utf-8"))
                         proposal = self.store.put("proposals", {
                             "report_id": identifier, "demo": False, "expected": _versions(report["profile"]),
                             "old": {"system": report["profile"]["system"]["data"], "prompt": report["profile"]["prompt"]["data"]},

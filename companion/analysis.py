@@ -133,6 +133,7 @@ class Jobs:
         try:
             self.thread.start()
         except RuntimeError:
+            self.thread = None
             job.update(state="failed", finished_at=utc_now(), error={
                 "code": "job_failed", "message": "Provider job could not start. No automatic retry was made."})
             self.active = None

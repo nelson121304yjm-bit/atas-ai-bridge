@@ -555,6 +555,99 @@ class WorkflowTests(unittest.TestCase):
         self.finish(successful[0])
         self.assertEqual(len(self.provider.calls), 1)
 
+    def test_escaped_credential_is_redacted_after_decoding_proposal_json(self):
+        report = self.report()
+        credential = "synthetic-credential-only"
+        proposed = {"system": {field: credential for field in SYSTEM_FIELDS},
+                    "prompt": credential, "reason": credential}
+        escaped = "".join("\\u%04x" % ord(char) for char in credential)
+        self.provider.result = {"text": json.dumps(proposed).replace(credential, escaped)}
+        self.assertNotIn(credential, self.provider.result["text"])
+        job = self.finish(self.call("POST", "/api/reports/" + report["id"] + "/propose"))
+        self.assertEqual(job["state"], "succeeded", job)
+        proposal_id = job["result"]["proposal_id"]
+        reads = {
+            "job": self.call("GET", "/api/jobs/" + job["id"]),
+            "proposal": self.call("GET", "/api/proposals/" + proposal_id),
+            "report": self.call("GET", "/api/reports/" + report["id"]),
+        }
+        for name, value in reads.items():
+            with self.subTest(read=name):
+                self.assertFalse(credential in json.dumps(value), "Decoded credential leaked into API data")
+        with self.subTest(read="sqlite"):
+            self.assertFalse(credential.encode() in (self.directory / "workbench.sqlite3").read_bytes(),
+                             "Decoded credential leaked into SQLite")
+
+    def test_explicit_key_mode_applies_to_reselected_endpoint_binding(self):
+        from companion.credentials import CredentialVault
+
+        class SyntheticKeychain:
+            def __init__(keychain):
+                keychain.values = {}
+
+            def get(keychain, address):
+                return keychain.values.get(address)
+
+            def set(keychain, address, key):
+                keychain.values[address] = key
+
+            def delete(keychain, address):
+                keychain.values.pop(address, None)
+
+        keychain = SyntheticKeychain()
+        self.app.vault = CredentialVault(keychain=keychain)
+        address_a, address_b = "https://synthetic.invalid/a", "https://synthetic.invalid/b"
+        self.configure(base_url=address_a, key="synthetic-a-credential", persist_key=True)
+        self.configure(base_url=address_b, key="synthetic-b-credential", persist_key=False)
+        self.assertIn(address_a, keychain.values)
+        response = self.call("POST", "/api/settings", {"base_url": address_a, "persist_key": False})
+        self.assertFalse(response["settings"]["persist_key"])
+        self.assertTrue(response["settings"]["key_present"])
+        self.assertNotIn(address_a, keychain.values)
+        self.assertEqual(self.app.vault.get(address_a), "synthetic-a-credential")
+        self.assertEqual(self.app.vault.get(address_b), "synthetic-b-credential")
+        self.assertEqual(self.provider.calls, [])
+
+    def test_worker_start_failure_still_closes_store_and_removes_runtime(self):
+        from companion import server
+        self.configure()
+        preview = self.preview()
+        observed = {}
+        self.addCleanup(self.app.store.close)
+
+        class FakeServer:
+            server_address = ("127.0.0.1", 8770)
+            auth = type("Auth", (), {"control_token": "synthetic-control"})()
+            bridge_port = None
+
+            def serve_forever(fake):
+                with patch("companion.analysis.threading.Thread.start", side_effect=RuntimeError("synthetic failure")):
+                    observed["job"] = self.call("POST", "/api/analyze", {"preview_id": preview["id"]})["job"]
+
+            def server_close(fake):
+                observed["server_closed"] = True
+
+        failure = None
+        with patch("companion.server.Workbench", return_value=self.app), \
+                patch("companion.server.make_server", return_value=FakeServer()), \
+                patch("companion.server.signal.signal"), \
+                patch.object(self.app.store, "close", wraps=self.app.store.close) as close:
+            try:
+                server.serve(self.directory)
+            except Exception as exc:
+                failure = exc
+            closed_count = close.call_count
+        with self.subTest(check="clean_shutdown"):
+            self.assertIsNone(failure)
+        with self.subTest(check="store_closed"):
+            self.assertEqual(closed_count, 1)
+        with self.subTest(check="runtime_removed"):
+            self.assertFalse((self.directory / "runtime.json").exists())
+        self.assertTrue(observed["server_closed"])
+        self.assertEqual(observed["job"]["state"], "failed")
+        self.assertEqual(observed["job"]["error"]["code"], "job_failed")
+        self.assertEqual(self.provider.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()
