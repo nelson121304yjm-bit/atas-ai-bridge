@@ -61,13 +61,13 @@ atas-ai-bridge/
 
 ### macOS / ATAS X
 
-需要安装 **ATAS X、.NET 10 SDK 和 Python 3.10+**。在项目根目录运行：
+需要安装 **ATAS X、.NET 10 SDK 和 Python 3.12+**（本机工作台）。在项目根目录运行：
 
 ```bash
 bash build.sh                   # 只构建，不修改 ATAS
 # 退出 ATAS 后再显式安装（旧插件会先备份）：
 bash build.sh --install
-bash install-workbench.sh --install  # 安装本地工作台启动器；不重启 ATAS
+bash install-workbench.sh --install  # 创建独立 Python venv 和本地启动器；不重启 ATAS
 bash mcp/setup-venv.sh           # 建独立 venv，输出 MCP 客户端配置
 ```
 
@@ -81,6 +81,10 @@ MCP 会从 macOS 的 Application Support 目录自动发现桥端口。
 `~/Library/Application Support/ATAS AI Review/installation.json` 读取启动路径。
 `install-workbench.sh --state-dir PATH` 仅为手动启动或隔离测试创建自定义状态目录；
 图表按钮仍读取默认位置。
+本机工作台的 Python 环境位于私有状态目录的 `.venv`，与 MCP 的 `mcp/.venv`
+分开；不安装网络依赖。可选交易日志在安装时用四个显式参数指定路径和账户，
+升级时保持原配置，不会扫描私有文件或密钥。工作台提供“分析 / 交易日志 / 我的系统 /
+模型设置”四个页面；模型请求只在明确点击测试、分析、追问或生成提案时发出。
 完整步骤、端口配置、回退和验证范围见 [macOS 指南](docs/macos.md)。
 
 ### Windows（原有流程）

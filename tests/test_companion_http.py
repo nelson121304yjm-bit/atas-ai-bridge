@@ -56,6 +56,18 @@ class HttpTests(unittest.TestCase):
         self.assertIn(b"app.js", body)
         self.assertNotIn(b"<script>", body)
         self.assertNotIn(b"defer", body, "bootstrap fragment must be removed before body render")
+        self.assertLess(body.index(b"/bootstrap.js"), body.index(b"<body>"))
+        self.assertNotIn(b"onclick=", body)
+
+    def test_workbench_modules_are_explicitly_allowlisted(self):
+        for path in ("/bootstrap.js", "/app.js", "/ui.js", "/analysis.js",
+                     "/report.js", "/journal.js", "/system.js", "/settings.js", "/app.css"):
+            with self.subTest(path=path):
+                status, headers, body = self.request("GET", path)
+                self.assertEqual(status, 200)
+                self.assertTrue(body)
+                self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(self.request("GET", "/settings.js.map")[0], 404)
 
     def test_api_requires_session_and_bootstrap_is_one_use(self):
         self.assertEqual(self.request("GET", "/api/status")[0], 401)

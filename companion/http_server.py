@@ -19,8 +19,15 @@ from .common import AppError, encode_json, utc_now
 MAX_BODY = 196608
 ASSETS = {
     "/": ("index.html", "text/html; charset=utf-8"),
+    "/bootstrap.js": ("bootstrap.js", "text/javascript; charset=utf-8"),
     "/app.js": ("app.js", "text/javascript; charset=utf-8"),
     "/app.css": ("app.css", "text/css; charset=utf-8"),
+    "/ui.js": ("ui.js", "text/javascript; charset=utf-8"),
+    "/analysis.js": ("analysis.js", "text/javascript; charset=utf-8"),
+    "/report.js": ("report.js", "text/javascript; charset=utf-8"),
+    "/journal.js": ("journal.js", "text/javascript; charset=utf-8"),
+    "/system.js": ("system.js", "text/javascript; charset=utf-8"),
+    "/settings.js": ("settings.js", "text/javascript; charset=utf-8"),
 }
 
 

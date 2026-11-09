@@ -1,6 +1,6 @@
 # macOS / ATAS X 使用指南
 
-本分支给现有 ATAS AI Bridge 增加 macOS 只读指标入口、状态显示、安装与端口发现；Windows 的
+本分支给现有 ATAS AI Bridge 增加 macOS 只读指标入口和本机 AI 复盘工作台；Windows 的
 `build.ps1`、`mcp/setup-venv.ps1` 和交易开关行为保持原样。
 MIT 许可证与上游署名保留。
 
@@ -8,7 +8,8 @@ MIT 许可证与上游署名保留。
 
 - 已安装可正常使用的 ATAS X。编译使用本机安装目录的 SDK，不下载或分发 ATAS 厂商 DLL。
 - .NET **10 SDK**（仅安装 runtime 不足以编译）。`dotnet --version` 应输出 10.x。
-- Python **3.10+**。Python 依赖安装到项目内的 `mcp/.venv`，不改全局包。
+- Python **3.12+** 用于本机工作台；安装器在私有状态目录创建独立 `.venv`，只用标准库。
+  MCP 客户端另用项目内的 `mcp/.venv`，不改全局包。
 - 在项目根目录运行以下命令。脚本兼容 macOS 自带的 Bash 3.2，路径可含空格。
 
 ## 2. 构建和安装
@@ -49,7 +50,47 @@ DOTNET=/absolute/path/to/dotnet bash build.sh
 回退：退出 ATAS，将对应 `.bak.*` 文件复制回 `ATAS.AiBridge.dll`，再启动平台。
 如果是首次安装且没有备份，可在退出 ATAS 后移除该 DLL。
 
-## 3. 准备 MCP
+## 3. 安装本机工作台
+
+```bash
+bash install-workbench.sh --install --python /absolute/path/to/python3.12
+```
+
+`--python` 可省略，此时使用 `python3`，但版本必须为 3.12 或更高。
+安装器在 `~/Library/Application Support/ATAS AI Review` 建立专用 `.venv`、
+只含本机配置的 `installation.json` 和可双击的 `Open ATAS AI Review.command`。
+它不下载模型依赖、不安装 ATAS 指标，也不重启 ATAS。首次启动从图表的“打开 AI 工作台”
+按钮或双击该 `.command` 文件；多次打开会复用现有本机后台。
+
+可选接入已有**模拟交易日志**，四个参数必须同时给出，且指向现有文件：
+
+```bash
+bash install-workbench.sh --install \
+  --journal-python /absolute/path/to/python3.12 \
+  --journal-script /absolute/path/to/journal-server.py \
+  --journal-db /absolute/path/to/existing-journal.sqlite \
+  --journal-account YOUR_SIM_ACCOUNT_ID
+```
+
+这四项仅写入权限为 `0600` 的 `journal.json`，页面不能修改可执行程序或数据库路径。
+脚本不会查找私有日志、自动创建数据库或读取模型密钥。再次安装且未给出日志参数时，
+原 `journal.json` 保留；显式使用 `--disable-journal` 才移除这个适配器配置，
+不会删除独立日志数据库。未配置或配置失效时“交易日志”显示未连接，行情分析仍可用。
+
+“模型设置”填写完整 Base URL、模型名与用户自己的 Key。Key 默认只在本次后台会话中；
+勾选后才存入 macOS Keychain。改变服务地址后必须重新输入该地址的 Key。
+连接测试只发送固定合成文本；发送预览先显示目标、大小、完整证据和质量边界，
+点击“发送至模型”后才发送行情或交易证据。报告文本不执行 HTML；演示报告始终标注
+“本地演示”，不能追问或生成规则提案。接受提案会创建新版本，遇到版本冲突需手动合并。
+
+回退／卸载工作台：先退出工作台后台和 ATAS，然后移走默认状态目录中的
+`installation.json` 与 `Open ATAS AI Review.command`，图表入口将不再启动工作台。
+需要完全卸载工作台环境时，可再移走该目录的 `.venv`。**保留** `workbench.sqlite3`、
+`journal.json` 以及独立日志数据库和报告数据；若确需删除报告，请单独备份并明确操作。
+`build.sh --install` 创建的指标可按上文 `.bak.*` 方法独立回退。
+自定义 `--state-dir` 仅用于手动启动或隔离测试，图表入口仍查找默认目录。
+
+## 4. 准备 MCP
 
 ```bash
 bash mcp/setup-venv.sh
@@ -73,9 +114,9 @@ bash mcp/setup-venv.sh
 ```
 
 无需给这个数据桥填写模型 API Key；模型账户或 Key 由所选 AI 客户端管理。
-这是数据桥的 macOS 兼容补丁，不是内置模型聊天／自动交易复盘产品。
+MCP 数据桥与本机 AI 复盘工作台互相独立；MCP 客户端的 Key 不会被工作台读取。
 
-## 4. 在模拟图表启动并检查
+## 5. 在模拟图表启动并检查
 
 1. 打开 BTCUSDT（Binance Futures）图表，先选择 Crypto Sim 验证。
 2. 打开图表的**指标**列表，切到 All 或 Custom，搜索 **AI Bridge — read only**。
