@@ -43,8 +43,9 @@ def default_payloads():
             "/api/footprint": {"ok": True, "currentBar": 26, "bars": footprint},
             "/api/dom": {"ok": True, "bids": [{"price": i, "volume": 1} for i in range(20)],
                          "asks": [{"price": i, "volume": 1} for i in range(20)]},
-            "/api/profile": {"ok": True, "levels": [{"p": i, "v": 1}
-                             for i in range(230)], "levelCount": 230, "usedBars": 60}}
+            "/api/profile": {"ok": True, "fromBar": 0, "toBar": 25,
+                             "levels": [{"p": i, "v": 1} for i in range(230)],
+                             "levelCount": 230, "usedBars": 26}}
 
 
 class FakeBridge(BaseHTTPRequestHandler):
@@ -125,6 +126,8 @@ class MarketEvidenceTests(unittest.TestCase):
         self.assertIn("/api/candles", FakeBridge.calls)
         self.assertIn("/api/cvd", FakeBridge.calls)
         self.assertIn("/api/footprint", FakeBridge.calls)
+        self.assertIn("/api/profile?bars=200", FakeBridge.calls)
+        self.assertNotIn("/api/profile", FakeBridge.calls)
         self.assertNotIn("/api/position", FakeBridge.calls)
         self.assertEqual(FakeBridge.calls.count("/api/status"), 2)
         for item in value["evidence"].values():
@@ -178,6 +181,27 @@ class MarketEvidenceTests(unittest.TestCase):
         value = MarketSource(self.port).capture()
         self.assertNotIn("profile", value["evidence"])
         self.assertNotIn("profile_includes_forming_bar", value["quality"])
+
+    def test_profile_forming_marker_uses_returned_bar_range(self):
+        FakeBridge.payloads["/api/profile"]["toBar"] = 24
+        lagged = MarketSource(self.port).capture()
+        self.assertFalse(lagged["evidence"]["profile"]["data"]["includes_forming_bar"])
+        self.assertNotIn("profile_includes_forming_bar", lagged["quality"])
+        FakeBridge.payloads["/api/profile"]["toBar"] = 26
+        ahead = MarketSource(self.port).capture()
+        self.assertIsNone(ahead["evidence"]["profile"]["data"]["includes_forming_bar"])
+        self.assertIn("profile_forming_bar_unknown", ahead["quality"])
+
+    def test_cvd_origin_uses_observed_rows_even_if_cache_lags_settings(self):
+        FakeBridge.payloads["/api/cvd"] = default_payloads()["/api/cvd"][12:23]
+        lagged = MarketSource(self.port).capture()
+        self.assertEqual(lagged["evidence"]["cvd"]["data"]["calculation_window_start_bar"], 12)
+        self.assertNotIn("forming_cvd", lagged["evidence"])
+        FakeBridge.payloads["/api/status"] = status(port=self.port, snapshotBars=7)
+        FakeBridge.payloads["/api/cvd"] = default_payloads()["/api/cvd"][10:26]
+        changed_setting = MarketSource(self.port).capture()
+        self.assertEqual(changed_setting["evidence"]["cvd"]["data"]["calculation_window_start_bar"], 10)
+        self.assertEqual(changed_setting["evidence"]["forming_cvd"]["data"]["calculation_window_start_bar"], 10)
 
     def test_bad_data_raw_oversize_redirect_and_final_oversize(self):
         for raw in (b"not-json", b'{"ok":NaN}', b" " * (3 * 1024 * 1024 + 1)):

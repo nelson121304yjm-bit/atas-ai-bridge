@@ -182,9 +182,10 @@ class MarketSource:
         return selected[-20:], forming
 
     @staticmethod
-    def _cvd(value, current_bar, snapshot_bars):
+    def _cvd(value, current_bar):
         selected = []
         forming = None
+        source_indices = []
         for item in _objects(value):
             index = item.get("i")
             if type(index) is not int or index < 0:
@@ -194,18 +195,22 @@ class MarketSource:
                 raise AppError("bridge_invalid_response", "ATAS returned invalid CVD.", 502)
             row = {"i": index, "t": item["t"], "sessionStart": item["sessionStart"],
                    **_numbers(item, ("delta", "cvd"))}
+            source_indices.append(index)
             if index == current_bar - 1:
-                forming = {**row, "is_closed": False, "basis": "window_relative",
-                           "calculation_window_start_bar": max(0, current_bar - snapshot_bars)}
+                forming = {**row, "is_closed": False, "basis": "window_relative"}
             elif index < current_bar - 1:
                 selected.append(row)
         selected.sort(key=lambda item: item["i"])
         selected = selected[-20:]
         if not selected:
             raise AppError("bridge_invalid_response", "ATAS returned no CVD.", 502)
+        source_start = min(source_indices)
+        if forming is not None:
+            forming["calculation_window_start_bar"] = source_start
+            forming["origin_provenance"] = "first_observed_source_row"
         return {"basis": "window_relative", "full_session_cvd": False,
-                "calculation_window_start_bar": max(0, current_bar - snapshot_bars),
-                "calculation_window_requested_bars": snapshot_bars,
+                "calculation_window_start_bar": source_start,
+                "origin_provenance": "first_observed_source_row",
                 "returned_window_start_bar": selected[0]["i"],
                 "returned_window_end_bar": selected[-1]["i"],
                 "session_reset_in_window": any(row["sessionStart"] for row in selected),
@@ -244,7 +249,7 @@ class MarketSource:
                                   "poc", "vah", "val", "totalVolume", "valueAreaVolume"))
         result.update({"level_count": value.get("levelCount"), "returned_level_count": len(selected),
                        "truncated": value.get("truncated") is True or len(rows) > 20,
-                       "selection": "top_volume", "includes_forming_bar": True,
+                       "selection": "top_volume", "requested_bars": 200,
                        "levels": [_numbers(row, ("p", "v", "bid", "ask")) for row in selected]})
         return result
 
@@ -291,10 +296,9 @@ class MarketSource:
         quality = ["non_atomic_endpoint_capture"]
         processors = (("quote", "/api/quote", self._quote),
                       ("candles", "/api/candles", lambda data: self._candles(data, start["currentBar"])),
-                      ("cvd", "/api/cvd", lambda data: self._cvd(data, start["currentBar"],
-                                                                  start["snapshotBars"])),
+                      ("cvd", "/api/cvd", lambda data: self._cvd(data, start["currentBar"])),
                       ("footprint", "/api/footprint", lambda data: self._footprint(data, start["currentBar"])),
-                      ("dom", "/api/dom", self._dom), ("profile", "/api/profile", self._profile))
+                      ("dom", "/api/dom", self._dom), ("profile", "/api/profile?bars=200", self._profile))
         for name, path, process in processors:
             try:
                 raw, retrieved_at = self._get(path)
@@ -318,12 +322,22 @@ class MarketSource:
                                        "closed_rows_truncated": closed_count > returned_count,
                                        "forming_or_future_rows_excluded": len(raw) - closed_count}
             evidence[name] = entry
-            if name == "profile":
-                quality.append("profile_includes_forming_bar")
         end, end_at = self._get("/api/status")
         self._validate_status(end)
         if any(start.get(key) != end.get(key) for key in STATUS_IDENTITY) or end["currentBar"] < start["currentBar"]:
             raise AppError("bridge_status_changed", "ATAS chart or account changed during capture.", 409)
+        if "profile" in evidence:
+            profile = evidence["profile"]["data"]
+            to_bar = profile.get("toBar")
+            if type(to_bar) is int and to_bar < start["currentBar"] - 1:
+                profile["includes_forming_bar"] = False
+            elif (type(to_bar) is int and start["currentBar"] == end["currentBar"]
+                  and to_bar == start["currentBar"] - 1):
+                profile["includes_forming_bar"] = True
+                quality.append("profile_includes_forming_bar")
+            else:
+                profile["includes_forming_bar"] = None
+                quality.append("profile_forming_bar_unknown")
         evidence["status_end"] = {"retrieved_at": end_at, "data": self._safe_status(end)}
         result = {"schema_version": 1, "source": "market", "captured_at": utc_now(),
                   "identity": {"security_id": SECURITY_ID, "instrument": "BTCUSDT",
@@ -335,7 +349,8 @@ class MarketSource:
                              "closed_candles": 20, "forming_candles": 1, "cvd_closed_bars": 20,
                              "forming_cvd_bars": 1, "footprint_bars": 2,
                              "footprint_levels_per_bar": 20, "dom_levels_per_side": 15,
-                             "profile_levels": 20, "endpoint_capture": "sequential_non_atomic",
+                             "profile_bars": 200, "profile_levels": 20,
+                             "endpoint_capture": "sequential_non_atomic",
                              "footprint_may_include_forming_bar": True,
                              "chart_aggregation_metadata": "actual_bridge_chart_type_and_time_frame",
                              "tick_size_source": "bridge_reported_not_exchange_verified"}}
