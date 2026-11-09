@@ -8,7 +8,7 @@ import signal
 import tempfile
 import threading
 
-from .common import AppError
+from .app import Workbench
 from .http_server import make_server
 
 
@@ -33,28 +33,26 @@ def write_private(path: Path, value: bytes) -> None:
 
 def serve(state_dir: Path, bridge_port: int | None = None) -> None:
     directory = private_state(state_dir)
-    bridge_state = {"port": bridge_port}
+    workbench = Workbench(directory)
+    if bridge_port is not None:
+        workbench.set_bridge_port(bridge_port)
     runtime_path = directory / "runtime.json"
 
-    def handler(method, path, payload):
-        if method == "GET" and path == "/api/status":
-            return {"ok": True, "service": "running", "configured": False,
-                    "bridgePort": bridge_state["port"]}
-        raise AppError("not_found", "接口尚未开放。", 404)
-
     def on_bridge_port_change(value: int) -> None:
-        metadata["bridge_port"] = value
-        write_private(runtime_path, json.dumps(metadata).encode("utf-8"))
-        bridge_state["port"] = value
+        changed = {**metadata, "bridge_port": value}
+        write_private(runtime_path, json.dumps(changed).encode("utf-8"))
+        workbench.set_bridge_port(value)
+        metadata.update(changed)
 
     for port in range(8770, 8781):
         try:
-            server = make_server(handler, directory, port=port,
+            server = make_server(workbench.handle, directory, port=port,
                                  on_bridge_port_change=on_bridge_port_change)
             break
         except OSError:
             continue
     else:
+        workbench.close()
         raise RuntimeError("No workbench port available on 127.0.0.1:8770-8780")
 
     metadata = {"pid": os.getpid(), "port": server.server_address[1],
@@ -71,6 +69,7 @@ def serve(state_dir: Path, bridge_port: int | None = None) -> None:
         server.serve_forever()
     finally:
         server.server_close()
+        workbench.close()
         try:
             current = json.loads(runtime_path.read_text())
             if current.get("pid") == os.getpid():

@@ -236,6 +236,19 @@ class Store:
                                     (kind, limit)).fetchall()
         return [self._record(row) for row in rows]
 
+    def proposals_for_report(self, report_id: str, limit: int = 50) -> "list[dict]":
+        """Newest proposals for this report; filter before the bounded history limit."""
+        if not isinstance(report_id, str) or not report_id:
+            raise AppError("invalid_report_id", "Report ID is invalid.")
+        if type(limit) is not int or not 1 <= limit <= 500:
+            raise AppError("invalid_limit", "Limit must be between 1 and 500.")
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT * FROM records WHERE kind='proposals' "
+                "AND json_extract(payload_json,'$.report_id')=? "
+                "ORDER BY created_at DESC, rowid DESC LIMIT ?", (report_id, limit)).fetchall()
+        return [self._record(row) for row in rows]
+
     def update(self, kind: str, identifier: str, value: dict) -> dict:
         self._kind(kind)
         value = _json_copy(value)
