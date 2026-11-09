@@ -1,5 +1,7 @@
 """Session keys and optional macOS Keychain persistence by provider address."""
 
+import sys
+
 from .common import AppError
 from .provider import _validate_key, normalize_base_url
 
@@ -27,6 +29,11 @@ class CredentialVault:
                 raise AppError("keychain_error", "Keychain could not save the provider key.", 503) from None
             self._session.pop(address, None)
         else:
+            if self._keychain is not None or sys.platform == "darwin":
+                try:
+                    self._persistent().delete(address)
+                except Exception:
+                    raise AppError("keychain_error", "Keychain could not clear the provider key.", 503) from None
             self._session[address] = key
 
     def get(self, base_url: str) -> str | None:

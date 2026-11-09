@@ -157,6 +157,10 @@ class CredentialTests(unittest.TestCase):
         self.vault.set(self.second, "persistent-key", persist=True)
         self.assertEqual(self.keychain.data[self.second], "persistent-key")
         self.assertTrue(CredentialVault(self.keychain).has(self.second))
+        self.vault.set(self.second, "new-session-key", persist=False)
+        self.assertEqual(self.vault.get(self.second), "new-session-key")
+        self.assertNotIn(self.second, self.keychain.data)
+        self.assertFalse(CredentialVault(self.keychain).has(self.second))
         self.vault.delete(self.second)
         self.assertFalse(self.vault.has(self.second))
 
