@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import fs from "node:fs";
+import vm from "node:vm";
 import {initAnalysis, updateStatus} from "../companion/static/analysis.js";
 import {initSettings, refreshSettings} from "../companion/static/settings.js";
 import {initSystem, refreshProfile} from "../companion/static/system.js";
@@ -45,6 +47,127 @@ function fakeDocument() {
 }
 
 const reply = (data, status = 200) => ({ok: status < 400, json: async () => data});
+
+function nativeBootstrap() {
+  const listeners = new Map();
+  const nativeListeners = new Map();
+  const acknowledgements = [];
+  const location = {hash: "", pathname: "/", search: "", hostname: "127.0.0.1", port: "8770",
+    protocol: "http:", origin: "http://127.0.0.1:8770"};
+  const window = {
+    location,
+    addEventListener(type, callback) {
+      const callbacks = listeners.get(type) || []; callbacks.push(callback); listeners.set(type, callbacks);
+    },
+    dispatchEvent(event) { for (const callback of listeners.get(event.type) || []) callback(event); },
+    chrome: {webview: {
+      addEventListener(type, callback) { nativeListeners.set(type, callback); },
+      postMessage(data) { acknowledgements.push(data); },
+    }},
+  };
+  window.top = window;
+  vm.runInNewContext(fs.readFileSync(new URL("../companion/static/bootstrap.js", import.meta.url), "utf8"),
+    {window, location, history: {replaceState() {}}, URLSearchParams, Event});
+  return {window, acknowledgements,
+    receive(data) { nativeListeners.get("message")?.({data}); }};
+}
+
+test("native bootstrap queues early and late messages once on the verified host channel", async () => {
+  const native = nativeBootstrap();
+  const token = "a".repeat(32), requestId = "1".repeat(32);
+  const message = {type: "atas-ai-review.bootstrap", version: 1, token, requestId};
+  native.receive(message);
+  assert.equal(native.window.reviewBootstrap.hasToken(), true);
+  const value = native.window.reviewBootstrap.take();
+  assert.equal(value.token, token);
+  assert.equal(value.requestId, requestId);
+  assert.equal(native.window.reviewBootstrap.hasToken(), false);
+  let changes = 0;
+  native.window.addEventListener("review-bootstrap", () => { changes += 1; });
+  native.receive(message);
+  assert.equal(changes, 0);
+  native.receive({...message, token: "b".repeat(32), requestId: "2".repeat(32)});
+  assert.equal(changes, 1);
+  assert.equal(native.window.reviewBootstrap.take().token, "b".repeat(32));
+  native.receive({type: "arbitrary-rpc", token, requestId});
+  native.receive({...message, token: "x"});
+  assert.equal(native.window.reviewBootstrap.hasToken(), false);
+  for (const [field, bad] of [["protocol", "https:"], ["hostname", "localhost"], ["port", "8781"],
+    ["pathname", "/other"], ["search", "?token=bad"], ["hash", "#bad"]]) {
+    const original = native.window.location[field];
+    native.window.location[field] = bad;
+    native.receive({...message, token: "e".repeat(32), requestId: "5".repeat(32)});
+    assert.equal(native.window.reviewBootstrap.hasToken(), false, field);
+    native.window.location[field] = original;
+  }
+});
+
+test("rejected native bootstrap reports failure once without requesting a provider", async () => {
+  const native = nativeBootstrap();
+  globalThis.window = native.window;
+  const {connectSession} = await import("../companion/static/ui.js");
+  let exchanges = 0;
+  globalThis.fetch = async path => {
+    assert.equal(path, "/api/bootstrap"); exchanges += 1;
+    return reply({error: {code: "unauthorized"}}, 403);
+  };
+  const message = {type: "atas-ai-review.bootstrap", version: 1, token: "f".repeat(32), requestId: "6".repeat(32)};
+  native.receive(message);
+  await assert.rejects(connectSession(), error => error.code === "unauthorized");
+  native.receive(message);
+  assert.equal(exchanges, 1);
+  assert.equal(native.acknowledgements.length, 1);
+  assert.equal(native.acknowledgements[0].ok, false);
+  assert.equal(native.window.reviewBootstrap.hasToken(), false);
+});
+
+test("native reauthentication before, during and after app startup installs handlers once", async t => {
+  for (const timing of ["before", "during", "after"]) await t.test(timing, async () => {
+    const get = fakeDocument();
+    const native = nativeBootstrap();
+    globalThis.window = native.window;
+    const originalInterval = globalThis.setInterval;
+    let intervals = 0;
+    globalThis.setInterval = () => { intervals += 1; return intervals; };
+    const calls = [];
+    let finishSession;
+    const delayedSession = new Promise(resolve => { finishSession = resolve; });
+    globalThis.fetch = async (path, options = {}) => {
+      calls.push({path, options});
+      if (path === "/api/session") return timing === "during" ? delayedSession : reply({error: {code: "unauthorized"}}, 401);
+      if (path === "/api/bootstrap") return reply({csrf: "synthetic-csrf"});
+      if (path === "/api/status") return reply({market: {}, journal: {connected: false}, configured: false});
+      if (path === "/api/settings") return reply({settings: {base_url: "", model: "", persist_key: false}});
+      if (path === "/api/profile") return reply({profile: profile("s", "p", "", "")});
+      if (path === "/api/reports") return reply({reports: []});
+      throw new Error(`Unexpected automatic request ${path}`);
+    };
+    const message = {type: "atas-ai-review.bootstrap", version: 1, token: "c".repeat(32), requestId: "3".repeat(32)};
+    try {
+      if (timing === "before") native.receive(message);
+      const app = await import(`../companion/static/app.js?native-start-${timing}`);
+      if (timing === "after") await app.start();
+      if (timing !== "before") native.receive(message);
+      if (timing === "during") finishSession(reply({error: {code: "unauthorized"}}, 401));
+      await app.start();
+      await app.start();
+      assert.equal(native.acknowledgements.length, 1);
+      assert.equal(native.acknowledgements[0].ok, true);
+      assert.equal(native.acknowledgements[0].requestId, message.requestId);
+      native.receive(message); // duplicate message must not exchange a consumed token
+      native.receive({...message, token: "d".repeat(32), requestId: "4".repeat(32)});
+      await app.start();
+      assert.equal(calls.filter(value => value.path === "/api/bootstrap").length, 2);
+      assert.equal(native.acknowledgements.length, 2);
+      assert.equal(get("preview-form").listeners.get("submit").length, 1);
+      assert.equal(get("settings-form").listeners.get("submit").length, 1);
+      assert.equal(get("refresh-status").listeners.get("click").length, 1);
+      assert.equal(intervals, 1);
+      assert.ok(calls.every(value => value.path === "/api/bootstrap" || !value.options.body),
+        "reauthentication issues no model/provider mutations");
+    } finally { globalThis.setInterval = originalInterval; }
+  });
+});
 const profile = (systemId, promptId, name, promptText) => ({
   system: {id: systemId, data: {name, timeframe: "", setup: "", entry: "", exit: "", risk: "", goal: ""}, created_at: "2026-11-09T00:00:00Z"},
   prompt: {id: promptId, data: promptText, created_at: "2026-11-09T00:00:00Z"},

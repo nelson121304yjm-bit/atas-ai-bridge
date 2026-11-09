@@ -24,6 +24,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Installed public dock/WebView APIs only; never distribute host assemblies. -->
+    <Reference Include="OFT.Platform.Avalonia;OFT.Platform.Core;OFT.Rendering.Avn;OFT.MVVM;OFT.Attributes;Newtonsoft.Json;Avalonia.Base;Avalonia.Controls;CommunityToolkit.Mvvm"
+               Condition="'$(MacIndicatorHost)' == 'true'">
+      <HintPath>$(ATAS_BASE)/%(Identity).dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="OFT.Rendering" Condition="'$(MacIndicatorHost)' == 'true'">
       <HintPath>$(ATAS_BASE)/OFT.Rendering.dll</HintPath>
       <Private>false</Private>

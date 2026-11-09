@@ -11,6 +11,8 @@ import time
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
+from companion.launch import native_launch_result
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,6 +83,47 @@ class LaunchTests(unittest.TestCase):
                                  bridge_port)
         self.assertEqual(self.launch(self.urls).returncode, 0)
         self.assertEqual(self.status_from_url(self.urls.read_text().strip())["bridgePort"], 34001)
+
+    def test_native_json_has_clean_root_and_one_use_bootstrap(self):
+        command = [sys.executable, "-m", "companion.launch", "--state-dir", str(self.state),
+                   "--native-json", "--bridge-port", "8790"]
+        first = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=10)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(first.stderr, "")
+        native = json.loads(first.stdout)
+        metadata = json.loads((self.state / "runtime.json").read_text())
+        self.addCleanup(lambda: self.stop(metadata["pid"]))
+        self.assertEqual(native["url"], f"http://127.0.0.1:{metadata['port']}/")
+        self.assertEqual(set(native), {"url", "token"})
+        self.assertTrue(native["token"])
+        connection = http.client.HTTPConnection("127.0.0.1", metadata["port"], timeout=3)
+        self.addCleanup(connection.close)
+        for expected in (200, 403):
+            connection.request("POST", "/api/bootstrap", body=json.dumps({"token": native["token"]}),
+                               headers={"Content-Type": "application/json"})
+            response = connection.getresponse()
+            response.read()
+            self.assertEqual(response.status, expected)
+        second = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=10)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(json.loads((self.state / "runtime.json").read_text())["pid"], metadata["pid"])
+        self.assertNotEqual(json.loads(second.stdout)["token"], native["token"])
+
+    def test_native_result_rejects_noncanonical_urls(self):
+        for url in ("http://localhost:8770/#token=x", "http://user@127.0.0.1:8770/#token=x",
+                    "http://example.com:8770/#token=x", "https://127.0.0.1:8770/#token=x",
+                    "http://127.0.0.1:8769/#token=x", "http://127.0.0.1:8781/#token=x",
+                    "http://127.0.0.1:8770/app#token=x", "http://127.0.0.1:8770/?x=y#token=x",
+                    "http://127.0.0.1:8770/#token=x&other=y", "http://127.0.0.1:8770/#token=",
+                    "http://127.0.0.1:8770/#token=x&token=y"):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                native_launch_result(url)
+
+    def test_native_json_is_mutually_exclusive(self):
+        result = subprocess.run([sys.executable, "-m", "companion.launch", "--native-json", "--open"],
+                                cwd=ROOT, capture_output=True, text=True, timeout=10)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
 
     @staticmethod
     def stop(pid):

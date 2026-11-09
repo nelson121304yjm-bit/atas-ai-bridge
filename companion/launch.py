@@ -8,10 +8,11 @@ import http.client
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlsplit
 import webbrowser
 
 if __package__ in (None, ""):
@@ -99,11 +100,31 @@ def _write_url(path: Path, url: str) -> None:
         file.write(url + "\n")
 
 
+def native_launch_result(url: str) -> dict[str, str]:
+    """Split a launcher URL only for the redirected native pipe, never persistence."""
+    parsed = urlsplit(url)
+    port = parsed.port
+    if (parsed.scheme != "http" or parsed.hostname != "127.0.0.1"
+            or port is None or not 8770 <= port <= 8780
+            or parsed.netloc != f"127.0.0.1:{port}" or parsed.path != "/" or parsed.query):
+        raise ValueError("Invalid native workbench URL")
+    fields = parse_qs(parsed.fragment, strict_parsing=True, keep_blank_values=True)
+    tokens = fields.get("token", [])
+    if (set(fields) != {"token"} or len(tokens) != 1
+            or not re.fullmatch(r"[A-Za-z0-9_-]{20,256}", tokens[0])):
+        raise ValueError("Invalid native workbench bootstrap")
+    root = f"http://127.0.0.1:{port}/"
+    if url != root + "#token=" + quote(tokens[0]):
+        raise ValueError("Invalid native workbench URL")
+    return {"url": root, "token": tokens[0]}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Open ATAS AI Review")
     destination = parser.add_mutually_exclusive_group(required=True)
     destination.add_argument("--open", action="store_true")
     destination.add_argument("--url-file", type=Path, help="Private test/automation output")
+    destination.add_argument("--native-json", action="store_true", help="Private native stdout pipe")
     parser.add_argument("--state-dir", type=Path, default=DEFAULT_STATE)
     parser.add_argument("--bridge-port", type=int)
     arguments = parser.parse_args()
@@ -113,7 +134,11 @@ def main() -> None:
         url = issue_url(arguments.state_dir, arguments.bridge_port)
     except RuntimeError as error:
         raise SystemExit(str(error)) from None
-    if arguments.url_file:
+    if arguments.native_json:
+        # The parent redirects stdout. Nothing credential-bearing is logged or
+        # written to layout settings, command arguments, or a URL file.
+        print(json.dumps(native_launch_result(url), separators=(",", ":")))
+    elif arguments.url_file:
         _write_url(arguments.url_file, url)
     elif not webbrowser.open(url):
         raise SystemExit("无法打开浏览器。请检查默认浏览器设置。")

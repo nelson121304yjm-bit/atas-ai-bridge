@@ -60,8 +60,10 @@ bash install-workbench.sh --install --python /absolute/path/to/python3.12
 `--python` 可省略，此时使用 `python3`，但版本必须为 3.12 或更高。
 安装器在 `~/Library/Application Support/ATAS AI Review` 建立专用 `.venv`、
 只含本机配置的 `installation.json` 和可双击的 `Open ATAS AI Review.command`。
-它不下载模型依赖、不安装 ATAS 指标，也不重启 ATAS。首次启动从图表的“AI Review（打开 AI 工作台）”
-按钮或双击该 `.command` 文件；多次打开会复用现有本机后台。
+它不下载模型依赖、不安装 ATAS 指标，也不重启 ATAS。首次启动在指标设置点击
+**Open AI review tab**，打开宿主原生可停靠标签页；图上按钮/状态新实例默认隐藏。
+也可双击该 `.command` 文件手动打开浏览器；多次打开会复用现有本机后台。
+原生限制、认证边界和待验收项目见 [原生验证记录](validation/2026-11-09-native-review-dock.md)。
 
 可选接入已有**模拟交易日志**，四个参数必须同时给出，且指向现有文件：
 

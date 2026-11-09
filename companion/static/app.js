@@ -8,6 +8,8 @@ import {initSettings, recoveredSettingsTest, refreshSettings} from "./settings.j
 
 let lastJournalConnected = null;
 let statusLoading = false;
+let initialized = false;
+let starting = null;
 function navigate(id) {
   for (const section of document.querySelectorAll("main > .page")) section.hidden = section.id !== id;
   for (const button of document.querySelectorAll(".tab")) {
@@ -45,21 +47,36 @@ async function refreshStatus(adoptJob = false) {
   } finally { statusLoading = false; }
 }
 
-async function start() {
+async function startSession() {
   try { await connectSession(); }
   catch (error) { setText("service", "无法连接本机服务"); showNotice(errorText(error)); return; }
-  for (const button of document.querySelectorAll(".tab")) button.addEventListener("click", () => navigate(button.dataset.tab));
-  byId("refresh-status").addEventListener("click", () => refreshStatus(true));
-  initAnalysis();
-  initReport(() => refreshProfile(false));
-  initJournal(() => navigate("analysis"));
-  initSystem();
-  initSettings();
+  showNotice("");
+  if (!initialized) {
+    initialized = true;
+    for (const button of document.querySelectorAll(".tab")) button.addEventListener("click", () => navigate(button.dataset.tab));
+    byId("refresh-status").addEventListener("click", () => refreshStatus(true));
+    initAnalysis();
+    initReport(() => refreshProfile(false));
+    initJournal(() => navigate("analysis"));
+    initSystem();
+    initSettings();
+    setInterval(() => refreshStatus(true), 10000);
+  }
   const results = await Promise.allSettled([refreshStatus(), refreshSettings(), refreshProfile(), refreshReports()]);
   for (const result of results) if (result.status === "rejected") showNotice(errorText(result.reason));
   const status = results[0].status === "fulfilled" ? results[0].value : null;
   if (status?.active_job) watchJob(status.active_job);
-  setInterval(() => refreshStatus(true), 10000);
 }
 
+export function start() {
+  if (starting) return starting;
+  starting = startSession().finally(() => {
+    starting = null;
+    // Covers a native message arriving while the initial session GET is pending.
+    if (window.reviewBootstrap?.hasToken?.()) start();
+  });
+  return starting;
+}
+
+window.addEventListener("review-bootstrap", start);
 start();

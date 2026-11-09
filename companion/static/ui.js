@@ -58,15 +58,28 @@ export function showNotice(message) {
   target.hidden = !message;
 }
 
-export async function connectSession() {
-  const token = window.reviewBootstrap?.token;
-  if (window.reviewBootstrap) window.reviewBootstrap.token = null;
-  const response = token
-    ? await fetch("/api/bootstrap", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({token})})
-    : await fetch("/api/session");
-  const data = await response.json();
-  if (!response.ok || !data.csrf) throw data.error || {code: "unauthorized"};
-  csrf = data.csrf;
+let connecting = null;
+export function connectSession() {
+  if (connecting) return connecting;
+  connecting = (async () => {
+    const bootstrap = window.reviewBootstrap;
+    const value = bootstrap?.take ? bootstrap.take() : {token: bootstrap?.token};
+    const token = value?.token;
+    if (bootstrap && !bootstrap.take) bootstrap.token = null;
+    try {
+      const response = token
+        ? await fetch("/api/bootstrap", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({token})})
+        : await fetch("/api/session");
+      const data = await response.json();
+      if (!response.ok || !data.csrf) throw data.error || {code: "unauthorized"};
+      csrf = data.csrf;
+      bootstrap?.complete?.(value, true);
+    } catch (error) {
+      bootstrap?.complete?.(value, false);
+      throw error;
+    }
+  })().finally(() => { connecting = null; });
+  return connecting;
 }
 
 export async function api(path, payload) {

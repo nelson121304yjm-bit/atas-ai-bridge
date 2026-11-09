@@ -3,14 +3,14 @@ namespace ATAS.AiBridge;
 
 using System;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
-using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Controls;
+using Avalonia.Threading;
 using ATAS.DataFeedsCore;
 using ATAS.Indicators;
 using OFT.Rendering.Context;
@@ -31,6 +31,10 @@ public partial class AiBridgeStrategy
     private bool _workbenchPressed;
     private int _workbenchLaunching;
     private volatile string _workbenchMessage;
+    private readonly CancellationTokenSource _reviewCancellation = new CancellationTokenSource();
+    private ReviewOpenAction _reviewOpenAction;
+    private volatile bool _indicatorDisposed;
+    private bool _reviewRegistered;
     private Portfolio Portfolio => TradingManager?.Portfolio;
     private bool IsActivated => _hostRunning;
 
@@ -51,7 +55,27 @@ public partial class AiBridgeStrategy
     }
 
     [DisplayName("Show bridge status on chart")]
-    public bool ShowBridgeStatus { get; set; } = true;
+    [DefaultValue(false)]
+    public bool ShowBridgeStatus { get; set; } = false;
+
+    [DisplayName("Show AI review button on chart")]
+    [DefaultValue(false)]
+    public bool ShowReviewButton { get; set; } = false;
+
+    [DisplayName("Open AI review tab")]
+    [Editor(typeof(ReviewOpenEditor), typeof(Control))]
+    [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+    [System.Xml.Serialization.XmlIgnore]
+    [System.Text.Json.Serialization.JsonIgnore]
+    [Newtonsoft.Json.JsonIgnore]
+    [OFT.Attributes.IgnoreClone]
+    public ReviewOpenAction OpenReviewTab
+    {
+        get => _reviewOpenAction ??= new ReviewOpenAction(RequestOpenReview);
+        // A writable value keeps the host editor enabled. Applying, restoring or
+        // deserializing settings cannot launch anything: only the editor Click can.
+        set { }
+    }
 
     public AiBridgeStrategy() : base(true)
     {
@@ -65,6 +89,7 @@ public partial class AiBridgeStrategy
 
     protected override void OnInitialize()
     {
+        if (!_reviewRegistered) { ReviewDockHost.Retain(); _reviewRegistered = true; }
         if (_server != null) return;
         if (!BridgeEnabled) { _hostStatus = "Disabled in indicator settings."; return; }
         try
@@ -94,6 +119,9 @@ public partial class AiBridgeStrategy
 
     protected override void OnDispose()
     {
+        _indicatorDisposed = true;
+        _reviewCancellation.Cancel();
+        if (_reviewRegistered) { _reviewRegistered = false; ReviewDockHost.Release(); }
         _hostRunning = false;
         UnsubscribeFromTimer(TimeSpan.FromSeconds(1), RedrawStatus);
         var port = _server?.Port ?? 0;
@@ -119,7 +147,7 @@ public partial class AiBridgeStrategy
         {
             var area = WorkbenchArea;
             if (area.Width < 100 || area.Height < 40) return;
-            var button = WorkbenchButton(area);
+            var button = ShowReviewButton ? WorkbenchButton(area) : Rectangle.Empty;
             if (!button.IsEmpty)
             {
                 context.FillRectangle(Color.FromArgb(235, 25, 90, 102), button);
@@ -172,7 +200,7 @@ public partial class AiBridgeStrategy
         try
         {
             if (e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
-                ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y))
+                ShowReviewButton && ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y))
             {
                 _workbenchPressed = true;
                 return true;
@@ -187,14 +215,10 @@ public partial class AiBridgeStrategy
         try
         {
             var insideButton = e != null && e.ChangedButton == RenderControlMouseButtons.Left &&
-                ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y);
+                ShowReviewButton && ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y);
             if (ShouldConsumeWorkbenchMouseUp(insideButton))
             {
-                if (Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) == 0)
-                {
-                    _workbenchMessage = "Opening workbench";
-                    _ = Task.Run(LaunchWorkbench);
-                }
+                RequestOpenReview();
                 return true;
             }
         }
@@ -210,53 +234,41 @@ public partial class AiBridgeStrategy
     {
         try
         {
-            if (e != null && ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y))
+            if (ShowReviewButton && e != null && ChartInfo != null && IsWorkbenchButtonHit(WorkbenchArea, e.X, e.Y))
                 return StdCursor.Hand;
         }
         catch { /* A chart callback must not propagate an optional UI error. */ }
         return base.GetCursor(e);
     }
 
-    private void LaunchWorkbench()
+    private void RequestOpenReview()
+    {
+        if (_indicatorDisposed || Interlocked.CompareExchange(ref _workbenchLaunching, 1, 0) != 0) return;
+        SetWorkbenchMessage("Opening native AI review tab");
+        _ = Task.Run(LaunchWorkbench);
+    }
+
+    private void SetWorkbenchMessage(string message)
+    {
+        _workbenchMessage = message;
+        Dispatcher.UIThread.Post(() =>
+        {
+            if (!_indicatorDisposed) RaisePropertyChanged(nameof(BridgeStatus));
+        });
+    }
+
+    private async Task LaunchWorkbench()
     {
         try
         {
-            var appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var metadataPath = Path.Combine(appData, "ATAS AI Review", "installation.json");
-            if (!File.Exists(metadataPath))
-            {
-                _workbenchMessage = "Workbench not installed; run install-workbench.sh --install";
-                return;
-            }
-            using var metadata = JsonDocument.Parse(File.ReadAllText(metadataPath));
-            var python = metadata.RootElement.GetProperty("python").GetString();
-            var launcher = metadata.RootElement.GetProperty("launcher").GetString();
-            if (string.IsNullOrWhiteSpace(python) || string.IsNullOrWhiteSpace(launcher) ||
-                !Path.IsPathFullyQualified(python) || !Path.IsPathFullyQualified(launcher) ||
-                !File.Exists(python) || !File.Exists(launcher))
-            {
-                _workbenchMessage = "Invalid workbench paths; run install-workbench.sh --install";
-                return;
-            }
-            var start = new ProcessStartInfo(python) { UseShellExecute = false, CreateNoWindow = true };
-            start.ArgumentList.Add(launcher);
-            start.ArgumentList.Add("--open");
-            var bridgePort = _server?.Port ?? 0;
-            if (bridgePort > 0)
-            {
-                start.ArgumentList.Add("--bridge-port");
-                start.ArgumentList.Add(bridgePort.ToString(CultureInfo.InvariantCulture));
-            }
-            using var process = Process.Start(start);
-            if (process == null || !process.WaitForExit(10000) || process.ExitCode != 0)
-                _workbenchMessage = "Workbench unavailable; retry shortly or check installation/browser";
-            else
-                _workbenchMessage = "Workbench opened";
+            SetWorkbenchMessage(await ReviewDockHost.OpenInstalledAsync(_server?.Port ?? 0, _reviewCancellation.Token));
         }
-        catch (Exception)
+        catch (OperationCanceledException) { SetWorkbenchMessage("AI review opening canceled."); }
+        catch (InvalidOperationException ex)
         {
-            _workbenchMessage = "Workbench launch failed; check installation/browser";
+            SetWorkbenchMessage(ex.Message);
         }
+        catch (Exception) { SetWorkbenchMessage("Native review unavailable; check ATAS/installation compatibility. Capture remains active."); }
         finally
         {
             Interlocked.Exchange(ref _workbenchLaunching, 0);
