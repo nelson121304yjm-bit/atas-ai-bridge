@@ -16,9 +16,12 @@ RECORD_METADATA = {
     "reports": {"followups"},
     "proposals": {"status", "resolution"},
 }
-SECRET_FIELDS = {"key", "api_key", "apikey", "access_key", "access_token",
-                 "token", "secret", "password", "authorization", "credential",
-                 "credentials", "bearer"}
+SECRET_FIELDS = {"key", "apikey", "apitoken", "accesskey", "accesstoken",
+                 "refreshtoken", "authtoken", "bearertoken", "secretkey",
+                 "clientsecret", "privatekey", "token", "secret", "password",
+                 "authorization", "credential", "credentials", "bearer"}
+METADATA_LIMIT = {"previews": 131072, "proposals": 131072,
+                  "reports": 14 * 1024 * 1024}
 DEFAULT_SETTINGS = {"base_url": "", "model": "", "persist_key": False}
 
 
@@ -32,7 +35,8 @@ def _json_copy(value):
 def _reject_secrets(value):
     if isinstance(value, dict):
         for key, item in value.items():
-            if isinstance(key, str) and key.lower().replace("-", "_") in SECRET_FIELDS:
+            if (isinstance(key, str) and
+                    "".join(char.lower() for char in key if char.isalnum()) in SECRET_FIELDS):
                 raise AppError("secret_metadata", "Credential fields are not accepted in local metadata.")
             _reject_secrets(item)
     elif isinstance(value, list):
@@ -158,11 +162,14 @@ class Store:
                                  "VALUES(?,?,?,?,?)",
                                  (uuid.uuid4().hex, encode_json(system).decode(), uuid.uuid4().hex,
                                   prompt, utc_now()))
+                rows = self._db.execute("SELECT * FROM profiles ORDER BY seq").fetchall()
+                saved = _profile_from_row(rows[-1])
+                saved["history"] = [_profile_from_row(item) for item in rows]
                 self._db.execute("COMMIT")
             except BaseException:
                 self._db.execute("ROLLBACK")
                 raise
-        return self.profile()
+        return saved
 
     @staticmethod
     def _kind(kind: str) -> None:
@@ -180,8 +187,8 @@ class Store:
                 raise AppError("invalid_metadata", "followups must be a list of at most 100 objects.")
             if key == "status" and (not isinstance(item, str) or len(item) > 64):
                 raise AppError("invalid_metadata", "status must be at most 64 characters.")
-        if len(encode_json(metadata)) > 131072:
-            raise AppError("metadata_too_large", "Record metadata exceeds 131072 bytes.")
+        if len(encode_json(metadata)) > METADATA_LIMIT[kind]:
+            raise AppError("metadata_too_large", "Record metadata exceeds its size limit.")
         return metadata
 
     @staticmethod
@@ -245,8 +252,8 @@ class Store:
                     raise AppError("not_found", "Record was not found.", 404)
                 metadata = json.loads(row["metadata_json"])
                 metadata.update(patch)
-                if len(encode_json(metadata)) > 131072:
-                    raise AppError("metadata_too_large", "Record metadata exceeds 131072 bytes.")
+                if len(encode_json(metadata)) > METADATA_LIMIT[kind]:
+                    raise AppError("metadata_too_large", "Record metadata exceeds its size limit.")
                 self._db.execute("UPDATE records SET metadata_json=? WHERE kind=? AND id=?",
                                  (encode_json(metadata).decode(), kind, identifier))
                 self._db.execute("COMMIT")

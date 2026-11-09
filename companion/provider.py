@@ -4,13 +4,15 @@ import ipaddress
 import json
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit, urlunsplit
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from .common import AppError, encode_json
 
 
 MAX_RESPONSE = 2 * 1024 * 1024
 TIMEOUT_SECONDS = 60
+MAX_ERROR_RESPONSE = 4096
+QUOTA_CODES = {"insufficient_quota", "quota_exceeded", "billing_hard_limit_reached"}
 
 
 def normalize_base_url(value: str) -> str:
@@ -43,11 +45,24 @@ class _NoRedirect(HTTPRedirectHandler):
 
 
 def _open_no_redirect(request: Request, timeout: int):
-    return build_opener(_NoRedirect()).open(request, timeout=timeout)
+    handlers = [ProxyHandler({})] if urlsplit(request.full_url).scheme == "http" else []
+    return build_opener(*handlers, _NoRedirect()).open(request, timeout=timeout)
 
 
 def _reject_nonfinite(_value):
     raise ValueError("Non-finite JSON number")
+
+
+def _quota_error(response: HTTPError) -> bool:
+    try:
+        raw = response.read(MAX_ERROR_RESPONSE + 1)
+        if len(raw) > MAX_ERROR_RESPONSE:
+            return False
+        data = json.loads(raw, parse_constant=_reject_nonfinite)
+        error = data.get("error") if isinstance(data, dict) else None
+        return isinstance(error, dict) and error.get("code") in QUOTA_CODES
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError, TypeError):
+        return False
 
 
 def _validate_key(key):
@@ -84,6 +99,8 @@ class ProviderClient:
         except HTTPError as exc:
             if exc.code == 401:
                 raise AppError("provider_auth", "Provider rejected credentials.", 401) from None
+            if exc.code in (402, 403, 429) and _quota_error(exc):
+                raise AppError("provider_quota", "Provider quota is exhausted.", 402) from None
             if exc.code == 429:
                 raise AppError("provider_rate_limited", "Provider rate limit reached.", 429) from None
             if 300 <= exc.code < 400:

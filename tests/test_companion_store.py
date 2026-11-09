@@ -34,6 +34,31 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(caught.exception.status, 409)
         self.assertEqual(len(self.store.profile()["history"]), 2)
 
+    def test_save_profile_returns_own_revision_when_another_writer_commits_afterward(self):
+        competitor = Store(self.directory)
+        self.addCleanup(competitor.close)
+        connection = self.store._db
+        interleaved = []
+
+        class CommitInterleaver:
+            def execute(self, statement, *arguments):
+                result = connection.execute(statement, *arguments)
+                if statement == "COMMIT":
+                    interleaved.append(competitor.save_profile({**SYSTEM, "name": "Competing"},
+                                                              "other prompt"))
+                return result
+
+            def close(self):
+                connection.close()
+
+        self.store._db = CommitInterleaver()
+        saved = self.store.save_profile({**SYSTEM, "name": "Mine"}, "my prompt")
+        self.assertEqual(len(interleaved), 1)
+        self.assertEqual(saved["system"]["data"]["name"], "Mine")
+        self.assertEqual(saved["prompt"]["data"], "my prompt")
+        self.assertNotEqual(saved["system"]["id"], interleaved[0]["system"]["id"])
+        self.assertEqual(competitor.profile()["system"]["data"]["name"], "Competing")
+
     def test_profile_and_records_return_detached_json(self):
         profile = self.store.save_profile(SYSTEM, "original")
         profile["system"]["data"]["name"] = "mutated"
@@ -55,6 +80,18 @@ class StoreTests(unittest.TestCase):
             self.store.update("reports", saved["id"], {"evidence": {"id": "replacement"}})
         self.assertEqual(self.store.get("reports", saved["id"])["text"], "original")
         self.assertEqual(self.store.list("reports")[0]["id"], saved["id"])
+
+    def test_report_metadata_fits_six_bounded_answers_and_is_still_bounded(self):
+        saved = self.store.put("reports", {"evidence": {"id": "immutable"}})
+        followup = {"question": "q" * 12000, "text": "a" * (2 * 1024 * 1024 - 100)}
+        six = [followup for _ in range(6)]
+        result = self.store.update("reports", saved["id"], {"followups": six})
+        self.assertEqual(len(result["followups"]), 6)
+        self.assertEqual(result["evidence"], {"id": "immutable"})
+        with self.assertRaises(AppError) as caught:
+            self.store.update("reports", saved["id"], {"followups": six + [followup]})
+        self.assertEqual(caught.exception.code, "metadata_too_large")
+        self.assertEqual(len(self.store.get("reports", saved["id"])["followups"]), 6)
 
     def test_preview_submission_and_proposal_resolution_are_mutable_metadata(self):
         preview = self.store.put("previews", {"evidence": {"id": "snap"}})
@@ -85,6 +122,17 @@ class StoreTests(unittest.TestCase):
         for value in ({"metadata": {"access_token": "secret"}}, {"authorization": "secret"}):
             with self.subTest(value=value), self.assertRaises(AppError):
                 self.store.put("reports", value)
+
+    def test_secret_field_variants_are_rejected_without_blocking_usage_counts(self):
+        for name in ("accessToken", "secretKey", "api-key", "API_Key", "clientSecret",
+                     "refreshToken", "authToken"):
+            with self.subTest(name=name), self.assertRaises(AppError) as caught:
+                self.store.put("reports", {"metadata": {name: "synthetic-secret"}})
+            self.assertEqual(caught.exception.code, "secret_metadata")
+        saved = self.store.put("reports", {"usage": {"prompt_tokens": 3,
+                                                       "completion_tokens": 5,
+                                                       "total_tokens": 8}})
+        self.assertEqual(saved["usage"]["total_tokens"], 8)
 
     def test_validation_and_failed_write_do_not_change_profile(self):
         before = self.store.save_profile(SYSTEM, "valid")

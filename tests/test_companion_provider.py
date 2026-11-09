@@ -1,6 +1,7 @@
 """Local fake provider protocol and injected credential storage."""
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
@@ -78,6 +79,33 @@ class ProviderTests(unittest.TestCase):
             ProviderClient().complete(self.base, "m", "synthetic-key", [])
         self.assertEqual(opened.call_args.args[1], 60)
 
+    def test_loopback_request_bypasses_environment_http_proxy(self):
+        class Proxy(BaseHTTPRequestHandler):
+            calls = []
+
+            def do_POST(self):
+                type(self).calls.append((self.path, self.headers.get("Authorization")))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"choices":[{"message":{"content":"proxied"}}]}')
+
+            def log_message(self, *_):
+                pass
+
+        proxy = ThreadingHTTPServer(("127.0.0.1", 0), Proxy)
+        self.addCleanup(proxy.server_close)
+        thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(proxy.shutdown)
+        proxy_url = "http://127.0.0.1:%d" % proxy.server_address[1]
+        with patch.dict(os.environ, {"http_proxy": proxy_url, "HTTP_PROXY": proxy_url,
+                                     "no_proxy": "", "NO_PROXY": ""}), \
+                patch("urllib.request.proxy_bypass", return_value=False):
+            result = ProviderClient().complete(self.base, "m", "synthetic-key", [])
+        self.assertEqual(result["text"], "review")
+        self.assertEqual(Proxy.calls, [])
+        self.assertEqual(len(FakeProvider.calls), 1)
+
     def test_status_errors_are_public_and_do_not_echo_secret(self):
         secret = "synthetic-do-not-echo"
         for status in (401, 429, 503):
@@ -90,6 +118,20 @@ class ProviderTests(unittest.TestCase):
                 self.assertNotIn(secret, caught.exception.message)
                 self.assertEqual(len(FakeProvider.calls), 1)
                 FakeProvider.calls.clear()
+
+    def test_quota_code_is_distinct_from_generic_rate_limit(self):
+        secret = "synthetic-do-not-echo"
+        FakeProvider.status = 429
+        FakeProvider.response = {"error": {"code": "insufficient_quota", "message": secret}}
+        with self.assertRaises(AppError) as caught:
+            ProviderClient().complete(self.base, "m", secret, [])
+        self.assertEqual(caught.exception.code, "provider_quota")
+        self.assertNotIn(secret, caught.exception.message)
+        FakeProvider.response = {"error": {"code": "rate_limit_exceeded", "message": secret}}
+        with self.assertRaises(AppError) as caught:
+            ProviderClient().complete(self.base, "m", secret, [])
+        self.assertEqual(caught.exception.code, "provider_rate_limited")
+        self.assertEqual(len(FakeProvider.calls), 2)
 
     def test_bad_json_bad_shape_oversize_and_redirect_are_rejected_without_retry(self):
         cases = [({"choices": []}, 200, None), (b"not-json", 200, None),
