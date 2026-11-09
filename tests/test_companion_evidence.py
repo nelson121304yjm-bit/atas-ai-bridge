@@ -13,7 +13,8 @@ from companion.evidence import MarketSource
 
 
 def status(**changes):
-    value = {"ok": True, "port": 0, "hostMode": "indicator", "readOnly": True,
+    value = {"ok": True, "port": 0, "version": "0.4.0-macos.1",
+             "hostMode": "indicator", "readOnly": True,
              "isActivated": True, "allowTrading": False, "tradingArmed": False,
              "instrument": "BTCUSDT", "securityId": "BTCUSDT@BinanceFutures",
              "portfolio": "PRIVATE-SIM-ACCOUNT", "accountIsReal": False,
@@ -137,6 +138,20 @@ class MarketEvidenceTests(unittest.TestCase):
         value = MarketSource(self.port).status()
         self.assertTrue(value["eligible"])
         self.assertEqual(value["account"], "PRIVATE-SIM-ACCOUNT")
+        self.assertEqual(value["bridge_version"], "0.4.0-macos.1")
+
+    def test_status_keeps_actual_version_when_capture_ineligible(self):
+        FakeBridge.payloads["/api/status"] = status(port=self.port, accountIsReal=True,
+                                                    version="0.4.1-macos.2")
+        value = MarketSource(self.port).status()
+        self.assertFalse(value["eligible"])
+        self.assertEqual(value["bridge_version"], "0.4.1-macos.2")
+
+    def test_status_omits_missing_or_invalid_version(self):
+        for version in (None, "", "x" * 65, "bad\nversion", 123):
+            with self.subTest(version=version):
+                FakeBridge.payloads["/api/status"] = status(port=self.port, version=version)
+                self.assertNotIn("bridge_version", MarketSource(self.port).status())
 
     def test_malformed_status_is_reported_as_ineligible(self):
         FakeBridge.payloads["/api/status"] = []
@@ -191,6 +206,14 @@ class MarketEvidenceTests(unittest.TestCase):
         ahead = MarketSource(self.port).capture()
         self.assertIsNone(ahead["evidence"]["profile"]["data"]["includes_forming_bar"])
         self.assertIn("profile_forming_bar_unknown", ahead["quality"])
+
+    def test_matching_profile_end_with_skipped_bar_is_unknown(self):
+        FakeBridge.payloads["/api/profile"]["usedBars"] = 25
+        value = MarketSource(self.port).capture()
+        self.assertEqual(value["evidence"]["profile"]["data"]["toBar"], 25)
+        self.assertIsNone(value["evidence"]["profile"]["data"]["includes_forming_bar"])
+        self.assertIn("profile_forming_bar_unknown", value["quality"])
+        self.assertNotIn("profile_includes_forming_bar", value["quality"])
 
     def test_cvd_origin_uses_observed_rows_even_if_cache_lags_settings(self):
         FakeBridge.payloads["/api/cvd"] = default_payloads()["/api/cvd"][12:23]

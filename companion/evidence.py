@@ -151,13 +151,20 @@ class MarketSource:
             value, _ = self._get("/api/status")
         except AppError as exc:
             return {"connected": False, "eligible": False, "reason": exc.code}
+        bridge_version = {}
+        if isinstance(value, dict):
+            version = value.get("version")
+            if (isinstance(version, str) and 1 <= len(version) <= 64
+                    and all(33 <= ord(char) <= 126 for char in version)):
+                bridge_version = {"bridge_version": version}
         try:
             self._validate_status(value)
         except AppError as exc:
             return {"connected": True, "eligible": False, "reason": exc.code,
-                    "account": value.get("portfolio") if isinstance(value, dict) and value.get("accountIsReal") is False else None}
+                    "account": value.get("portfolio") if isinstance(value, dict) and value.get("accountIsReal") is False else None,
+                    **bridge_version}
         return {"connected": True, "eligible": True, "account": value["portfolio"],
-                **self._safe_status(value)}
+                **self._safe_status(value), **bridge_version}
 
     @staticmethod
     def _candles(value, current_bar):
@@ -329,9 +336,14 @@ class MarketSource:
         if "profile" in evidence:
             profile = evidence["profile"]["data"]
             to_bar = profile.get("toBar")
+            from_bar = profile.get("fromBar")
+            used_bars = profile.get("usedBars")
+            complete_range = (type(from_bar) is int and from_bar >= 0 and type(to_bar) is int
+                              and from_bar <= to_bar and type(used_bars) is int
+                              and used_bars == to_bar - from_bar + 1)
             if type(to_bar) is int and to_bar < start["currentBar"] - 1:
                 profile["includes_forming_bar"] = False
-            elif (type(to_bar) is int and start["currentBar"] == end["currentBar"]
+            elif (complete_range and start["currentBar"] == end["currentBar"]
                   and to_bar == start["currentBar"] - 1):
                 profile["includes_forming_bar"] = True
                 quality.append("profile_includes_forming_bar")
