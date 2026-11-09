@@ -22,7 +22,6 @@ function render(value, fill = true) {
     byId("model").value = value.model || "";
     byId("persist-key").checked = !!value.persist_key;
   }
-  byId("key").value = "";
   setText("key-state", value.key_present
     ? `当前地址已有 Key（${value.persist_key ? "macOS Keychain" : "本次后台会话"}）；密钥不会回显。`
     : "当前地址没有 Key。保存地址后单独输入并保存。密钥不会回显。");
@@ -62,10 +61,10 @@ export function initSettings() {
     try {
       const response = await api("/api/settings", {key, persist_key: byId("persist-key").checked});
       render(response.settings);
+      byId("key").value = "";
       setText("settings-message", "当前服务地址的 Key 已保存，输入框已清空。");
       showNotice("");
     } catch (error) {
-      byId("key").value = "";
       setText("settings-message", errorText(error)); showNotice(errorText(error));
     } finally { targetChanged(); }
   });

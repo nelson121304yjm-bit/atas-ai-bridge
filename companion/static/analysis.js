@@ -3,6 +3,7 @@ import {api, byId, errorText, node, pretty, qualityText, runJob, setText, showNo
 import {openReport} from "./report.js";
 
 let preview = null;
+let previewStale = false;
 let marketEligible = false;
 let journalConnected = false;
 let closedTradeCount = 0;
@@ -15,6 +16,15 @@ function sourceChanged() {
   byId("preview-button").title = enabled ? "" : isTrade ? "日志无可用的已平仓模拟交易" : "ATAS 行情连接或模拟账户资格未通过";
 }
 
+function markPreviewStale() {
+  if (!preview || preview.submission || previewStale) return;
+  previewStale = true;
+  setText("preview-badge", "输入已修改 · 需重建");
+  byId("analyze-button").disabled = true;
+  byId("analyze-button").title = "问题或来源已修改，请重新生成发送预览";
+  showNotice("问题或证据来源已修改。请重新生成发送预览后再发送至模型。");
+}
+
 export function setTradeAvailability(connected, count) {
   journalConnected = connected;
   closedTradeCount = count;
@@ -22,6 +32,7 @@ export function setTradeAvailability(connected, count) {
 }
 
 export function selectTrade(id) {
+  markPreviewStale();
   byId("source").value = "trade";
   byId("trade-id").value = id;
   sourceChanged();
@@ -45,6 +56,7 @@ export function updateStatus(status) {
 
 function renderPreview(value) {
   preview = value;
+  previewStale = false;
   byId("preview-panel").hidden = false;
   setText("preview-badge", value.submission ? "已提交" : "未发送");
   setText("preview-target", `接收地址：${value.target?.endpoint || "未配置"} · 请求模型：${value.target?.model || "未配置"}`);
@@ -88,23 +100,28 @@ export async function refreshReports() {
 }
 
 export function initAnalysis() {
-  byId("source").addEventListener("change", sourceChanged);
+  byId("source").addEventListener("change", () => { markPreviewStale(); sourceChanged(); });
+  byId("trade-id").addEventListener("change", markPreviewStale);
+  byId("question").addEventListener("input", markPreviewStale);
   byId("refresh-reports").addEventListener("click", refreshReports);
   byId("preview-form").addEventListener("submit", async event => {
     event.preventDefault();
     const button = byId("preview-button"); button.disabled = true;
     const source = byId("source").value;
+    const rawInputs = {source, question: byId("question").value, trade_id: byId("trade-id").value};
     const payload = {source, question: byId("question").value.trim()};
     if (source === "trade") payload.trade_id = byId("trade-id").value;
     try {
       const response = await api("/api/preview", payload);
       renderPreview(response.preview);
-      showNotice("");
+      if (rawInputs.source !== byId("source").value || rawInputs.question !== byId("question").value ||
+          (source === "trade" && rawInputs.trade_id !== byId("trade-id").value)) markPreviewStale();
+      else showNotice("");
     } catch (error) { showNotice(errorText(error)); }
     finally { sourceChanged(); }
   });
   byId("analyze-button").addEventListener("click", async () => {
-    if (!preview || preview.submission || !preview.target?.endpoint || !preview.target?.model) return;
+    if (!preview || previewStale || preview.submission || !preview.target?.endpoint || !preview.target?.model) return;
     byId("analyze-button").disabled = true;
     try {
       const response = await api("/api/analyze", {preview_id: preview.id});
@@ -114,7 +131,7 @@ export function initAnalysis() {
       showNotice("");
     } catch (error) {
       showNotice(errorText(error));
-      if (!preview.submission) byId("analyze-button").disabled = !preview.target?.endpoint || !preview.target?.model;
+      if (!preview.submission) byId("analyze-button").disabled = previewStale || !preview.target?.endpoint || !preview.target?.model;
     }
   });
   byId("demo-button").addEventListener("click", async event => {

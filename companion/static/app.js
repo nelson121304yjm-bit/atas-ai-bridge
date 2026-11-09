@@ -51,7 +51,7 @@ async function start() {
   for (const button of document.querySelectorAll(".tab")) button.addEventListener("click", () => navigate(button.dataset.tab));
   byId("refresh-status").addEventListener("click", () => refreshStatus(true));
   initAnalysis();
-  initReport(() => refreshProfile(true));
+  initReport(() => refreshProfile(false));
   initJournal(() => navigate("analysis"));
   initSystem();
   initSettings();
