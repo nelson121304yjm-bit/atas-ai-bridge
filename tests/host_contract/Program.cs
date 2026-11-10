@@ -137,6 +137,16 @@ else
             ports.Add(port);
         }
         Check(ports[0] != ports[1], "origin fixtures have distinct live chart ports");
+        using (var client = new System.Net.Sockets.TcpClient())
+        {
+            await client.ConnectAsync("127.0.0.1", ports[0]);
+            var stream = client.GetStream();
+            await stream.WriteAsync(System.Text.Encoding.ASCII.GetBytes("GET /api/journal?days=1&days=2 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n"));
+            using var reader = new StreamReader(stream);
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            var response = await reader.ReadToEndAsync(deadline.Token);
+            Check(response.StartsWith("HTTP/1.1 400"), "duplicate journal bounds rejected before handler dispatch");
+        }
         var origin = RuntimeHelpers.GetUninitializedObject(type);
         type.GetField("_bridgeEnabled", flags)!.SetValue(origin, true);
         type.GetField("_reviewRegistered", flags)!.SetValue(origin, true);
@@ -360,6 +370,7 @@ else
         ("POST", "/api/order", "{}"), ("GET", "/api/order", ""),
         ("POST", "/api/order/cancel", "{}"), ("POST", "/api/position/close", "{}"),
         ("GET", "/api/position", ""), ("GET", "/api/orders", ""),
+        ("POST", "/api/journal", "{}"), ("GET", "/api/journal", ""),
         ("PUT", "/api/health", ""), ("DELETE", "/api/settings", "") })
     {
         var json = (string)handler.Invoke(host, new object[] {
