@@ -74,31 +74,28 @@ bash mcp/setup-venv.sh           # 建独立 venv，输出 MCP 客户端配置
 脚本默认读取 `/Applications/ATAS X.app/Contents/MonoBundle` 的 SDK，安装到
 `~/Library/Application Support/ATAS/Indicators`，不复制 ATAS 厂商 DLL。
 Mac 使用 **AI Bridge — read only 指标**：在图表的指标列表添加并应用即可，
-不使用下文的 Windows 图表策略启动按钮。指标仅提供行情读取；
+不使用下文的 Windows 图表策略启动按钮。指标提供行情和原生日志读取；
 不包含下单实现，HTTP 设置写入和账户订单/持仓接口也被拒绝。
 MCP 会从 macOS 的 Application Support 目录自动发现桥端口。
-在指标设置中点击 **Open AI review tab**，创建 ATAS 原生 **AI 复盘** 标签页；
-可用 ATAS 自带布局操作将它停靠到图表旁。重复打开激活同一专属面板并重新认证，
-关闭后可从同一设置入口重开。原生入口读取默认的
-`~/Library/Application Support/ATAS AI Review/installation.json`。
-图上按钮和状态默认隐藏；需要时分别启用 **Show AI review button on chart** 和
-**Show bridge status on chart**。不设置默认快捷键，不自动重排交易图表。
-`install-workbench.sh --state-dir PATH` 仅为手动启动或隔离测试创建自定义状态目录；
-原生入口仍读取默认位置。
-本机工作台的 Python 环境位于私有状态目录的 `.venv`，与 MCP 的 `mcp/.venv`
-分开；不安装网络依赖。可选交易日志在安装时用四个显式参数指定路径和账户，
-升级时保持原配置，不会扫描私有文件或密钥。工作台提供“分析 / 交易日志 / 我的系统 /
-模型设置”四个页面；模型请求只在明确点击测试、分析、追问或生成提案时发出。
-完整的 BYOK、发送预览、报告／提案、日志与恢复步骤见
-[工作台指南](docs/workbench.md)；构建、端口和回退见 [macOS 指南](docs/macos.md)。
-原生 dock 使用本机 ATAS X 8.0.15.663 公共宿主 API，遵守 WebPages 的许可、回放和品牌限制；
-不支持时在指标 **Bridge status (read only)** 中显示原因并继续行情采集。
-布局只保存 `http://127.0.0.1:8770..8780/` 无凭证根地址；一次性 token 由私有 stdout 管道及
-原生 WebView 消息交给 Python 交换 HttpOnly 会话，不写入 URL、标题、命令参数或日志。
-原有 `Open ATAS AI Review.command` 保留为手动浏览器入口，原生失败不会自动打开浏览器。
-[原生验证记录](docs/validation/2026-11-09-native-review-dock.md) 区分自动化、独立原生 WebView
-验证与仍待执行的 ATAS dock/设置入口实机验收；[既有工作台验证](docs/validation/2026-11-09-workbench.md)
-保留浏览器基线记录。Windows 继续使用原有策略流程，未增加此原生入口。
+双击 `~/Library/Application Support/ATAS AI Review/Open ATAS AI Review.command`
+打开已验证的浏览器工作台；首页核对当前图表桥端口与模拟账户。图上按钮／设置中的
+`Open AI review tab` 原生 dock 入口仍属实验实现，尚未通过 ATAS 内部实机验收，
+本轮不依赖或继续排障该入口。
+
+交易日志默认读取**同一行情桥端口、当前图表模拟账户**的 ATAS 原生
+`BTCUSDT@BinanceFutures` 日志，最近七天、最多 100 条原生配对记录。
+分批平仓保留独立行，不合成整个交易；价格、数量、原生盈亏和可空手续费保留十进制精度。
+“查看本地证据”无需配置模型；发送仍须“生成发送预览 → 明确点击分析”。
+原生盈亏的费用口径、币种、仓位单位、未知时区，以及历史 DOM／Delta／初始风险／MAE／MFE
+不推断。已有记录器数据和私有 `journal.json` 配置保留，但不再作为默认事实来源。
+
+本机工作台的 Python 环境位于私有状态目录的 `.venv`，与 MCP 的 `mcp/.venv` 分开；
+不安装网络依赖。完整 BYOK、预览、原生日志与恢复步骤见
+[工作台指南](docs/workbench.md)，构建和端口见 [macOS 指南](docs/macos.md)。
+只读 MCP 新增 `atas_native_journal` 与 `atas_native_trade_evidence`，使用同样的来源与证据限制。
+[原生日志验证记录](docs/validation/2026-11-10-native-trade-journal.md) 区分合成测试、SDK 构建和待实机对账；
+[原生 dock 记录](docs/validation/2026-11-09-native-review-dock.md) 保留原有实验状态。
+Windows 继续使用原有策略流程，本次原生日志端点仅在 Mac 只读指标提供。
 
 ### Windows（原有流程）
 

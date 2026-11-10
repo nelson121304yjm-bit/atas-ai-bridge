@@ -25,6 +25,11 @@ function markPreviewStale() {
   showNotice("问题或证据来源已修改。请重新生成发送预览后再发送至模型。");
 }
 
+export function invalidateTradeSelection() {
+  if (byId("source").value === "trade") markPreviewStale();
+  byId("trade-id").value = "";
+}
+
 export function setTradeAvailability(connected, count) {
   journalConnected = connected;
   closedTradeCount = count;

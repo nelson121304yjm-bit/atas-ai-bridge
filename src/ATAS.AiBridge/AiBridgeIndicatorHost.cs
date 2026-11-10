@@ -121,6 +121,7 @@ public partial class AiBridgeStrategy
     protected override void OnDispose()
     {
         _indicatorDisposed = true;
+        DetachJournalSelections();
         _reviewCancellation.Cancel();
         if (_reviewRegistered) { _reviewRegistered = false; ReviewDockHost.Release(_reviewOwner); }
         _hostRunning = false;

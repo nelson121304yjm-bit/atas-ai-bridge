@@ -131,6 +131,16 @@ def atas_log(lines: int = 80) -> dict[str, Any]:
     return _guard(lambda: _client.log(lines))
 
 
+@server.tool(description="只读：当前图表同一桥端口的 BTC 模拟账户原生配对记录，最近七天最多100条。部分平仓不合并；原生盈亏与可空手续费为十进制字符串。返回选择键用于单条证据。")
+def atas_native_journal() -> dict[str, Any]:
+    return _guard(_client.native_journal)
+
+
+@server.tool(description="只读：读取上次原生日志列表选择键对应的完整配对记录证据，重新验证账户/端口/来源。无账户或成交私有标识，无历史DOM/Delta/初始风险/MAE/MFE推断；不调用模型。")
+def atas_native_trade_evidence(trade_id: str) -> dict[str, Any]:
+    return _guard(lambda: _client.native_trade_evidence(trade_id))
+
+
 # ---------------------------------------------------------------------------
 # 设置（读写；0.2.0 新增）
 # ---------------------------------------------------------------------------

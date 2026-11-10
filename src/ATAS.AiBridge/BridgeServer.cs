@@ -149,7 +149,13 @@ internal sealed class BridgeServer
                         var eq = pair.IndexOf('=');
                         var key = eq < 0 ? pair : pair.Substring(0, eq);
                         var val = eq < 0 ? "" : pair.Substring(eq + 1);
-                        query[Uri.UnescapeDataString(key)] = Uri.UnescapeDataString(val.Replace("+", " "));
+                        var decodedKey = Uri.UnescapeDataString(key);
+                        if (query.ContainsKey(decodedKey))
+                        {
+                            await WriteResponseAsync(stream, 400, "{\"ok\":false,\"error\":\"Duplicate query parameter.\"}", ct).ConfigureAwait(false);
+                            return;
+                        }
+                        query[decodedKey] = Uri.UnescapeDataString(val.Replace("+", " "));
                     }
                 }
 

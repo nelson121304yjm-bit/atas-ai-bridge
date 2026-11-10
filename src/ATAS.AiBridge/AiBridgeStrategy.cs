@@ -42,7 +42,7 @@ public partial class AiBridgeStrategy : ChartStrategy
 {
     private const string BridgeId = "atas-ai-bridge";
 #if MAC_INDICATOR
-    private const string BridgeVersion = "0.4.0-macos.1";
+    private const string BridgeVersion = "0.5.0-macos.1";
 #else
     private const string BridgeVersion = "0.2.0";
 #endif
@@ -204,6 +204,7 @@ public partial class AiBridgeStrategy : ChartStrategy
 #if MAC_INDICATOR
             if (!_hostRunning || bar != CurrentBar - 1)
                 return;
+            ObserveJournalScope();
 #endif
             DrainActions();
             RefreshSnapshots(bar);
@@ -349,6 +350,8 @@ public partial class AiBridgeStrategy : ChartStrategy
                 ["chartType"] = ChartInfo?.ChartType,
                 ["timeFrame"] = ChartInfo?.TimeFrame,
                 ["accountIsReal"] = Portfolio?.IsRealAccount,
+                ["journalInstanceId"] = _journalInstance,
+                ["journalScopeId"] = _journalScope,
                 ["accountConnectionState"] = Portfolio?.ConnectionState.ToString(),
 #endif
                 ["serverTime"] = DateTime.UtcNow.ToString("o", CultureInfo.InvariantCulture)
@@ -1173,6 +1176,7 @@ public partial class AiBridgeStrategy : ChartStrategy
                 }, JsonOpts);
 
 #if MAC_INDICATOR
+            case "/api/journal": return ReadNativeJournal(query);
             case "/api/status": return WithHostFreshness(_statusJson);
 #else
             case "/api/status": return _statusJson;

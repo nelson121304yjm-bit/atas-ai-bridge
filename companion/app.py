@@ -1,6 +1,5 @@
 """Authenticated business routes for the local, read-only review workbench."""
 
-import json
 from pathlib import Path
 import re
 import threading
@@ -10,7 +9,7 @@ from .analysis import Jobs, answer, detached, parse_proposal, provider_metadata
 from .common import AppError, encode_json, utc_now
 from .credentials import CredentialVault
 from .evidence import MarketSource
-from .journal import JournalSource
+from .native_journal import NativeJournalSource
 from .prompts import (DEFAULT_PROMPT, EXECUTION_RULES, MAX_EVIDENCE_BYTES, TEST_MESSAGES,
                       checked_request, conversation, initial_messages, proposal_messages)
 from .provider import ProviderClient, _validate_key, normalize_base_url
@@ -68,11 +67,13 @@ class Workbench:
         self._lock = threading.RLock()
         self.store = Store(Path(state_dir))
         self.market = market if market is not None else MarketSource()
-        self.bridge_port = getattr(market, "port", None)
+        self.bridge_port = getattr(self.market, "port", None)
         self.provider = provider if provider is not None else ProviderClient()
         self.vault = vault if vault is not None else CredentialVault()
         self._journal_error = None
-        self.journal = journal if journal is not None else self._load_journal(Path(state_dir))
+        # Retain recorder config/data as an optional legacy source; native is the default.
+        self._native_journal = journal is None
+        self.journal = journal if journal is not None else NativeJournalSource(self.market)
         self.jobs = Jobs(self._lock)
         self._closed = False
         profile = self.store.profile()
@@ -83,30 +84,14 @@ class Workbench:
                 if exc.code != "version_conflict":
                     raise
 
-    def _load_journal(self, directory):
-        path = directory / "journal.json"
-        if not path.exists():
-            return JournalSource()
-        try:
-            if path.is_symlink():
-                raise ValueError()
-            with path.open("rb") as file:
-                raw = file.read(16385)
-            if len(raw) > 16384:
-                raise ValueError()
-            config = json.loads(raw)
-            if not isinstance(config, dict):
-                raise ValueError()
-            return JournalSource(config)
-        except (AppError, OSError, ValueError, TypeError):
-            self._journal_error = "journal_config"
-            return JournalSource()
-
     def set_bridge_port(self, port):
         if type(port) is not int or not 1 <= port <= 65535:
             raise AppError("invalid_bridge_port", "Bridge port is invalid.")
         replacement = MarketSource(port=port)
         with self._lock:
+            if self._native_journal:
+                self.journal.invalidate()
+                self.journal = NativeJournalSource(replacement)
             self.market = replacement
             self.bridge_port = port
 
@@ -115,6 +100,8 @@ class Workbench:
             if self._closed:
                 return
             self._closed = True
+            if self._native_journal:
+                self.journal.invalidate()
             self.jobs.closed = True
             thread = self.jobs.thread
         if thread is not None:
@@ -171,6 +158,16 @@ class Workbench:
                 "active_job": job, "job_history_count": count, "job_history_limit": 64,
                 "job_queue_limit": 0, "followup_limit": 6, "demo_available": True}
 
+    def _journal_read(self, trade_id=None):
+        with self._lock:
+            self._require_journal()
+            journal = self.journal
+        result = journal.list_trades() if trade_id is None else journal.capture(trade_id)
+        with self._lock:
+            if self._closed or journal is not self.journal:
+                raise AppError("native_journal_changed", "Journal source changed; refresh the list.", 409)
+        return result
+
     def _preview(self, payload):
         _fields(payload, {"source", "trade_id", "question"}, {"source", "question"})
         question = _question(payload["question"])
@@ -184,8 +181,7 @@ class Workbench:
             profile = _profile_snapshot(self.store.profile())
             market = self.market
         if source == "trade":
-            self._require_journal()
-            evidence = self.journal.capture(payload["trade_id"])
+            evidence = self._journal_read(payload["trade_id"])
         else:
             evidence = market.capture()
         evidence = detached(evidence)
@@ -353,8 +349,10 @@ class Workbench:
             if path == "/api/profile":
                 return {"ok": True, "profile": self.store.profile()}
             if path == "/api/trades":
-                self._require_journal()
-                return {"ok": True, "data": self.journal.list_trades()}
+                return {"ok": True, "data": self._journal_read()}
+            matched = re.fullmatch(r"/api/trades/([a-f0-9]{64})/evidence", path)
+            if matched:
+                return {"ok": True, "evidence": self._journal_read(matched[1])}
             if path == "/api/reports":
                 reports = [{name: item[name] for name in ("id", "created_at", "source", "question", "demo", "provider")}
                            for item in self.store.list("reports")]

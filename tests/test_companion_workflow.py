@@ -354,14 +354,15 @@ class WorkflowTests(unittest.TestCase):
         self.error("request_too_large", "POST", "/api/preview", {"source": "market", "question": "Review"})
         self.assertEqual(self.provider.calls, [])
 
-    def test_invalid_optional_journal_config_keeps_market_working(self):
+    def test_legacy_journal_config_is_preserved_without_blocking_native_default(self):
         self.app.close()
         (self.directory / "journal.json").write_text('{"script_path":"/invalid"}')
         self.app = Workbench(self.directory, market=self.market, provider=self.provider, vault=self.vault)
         self.configure()
-        self.assertEqual(self.call("GET", "/api/status")["journal"]["reason"], "journal_config")
+        self.assertIsNone(self.app._journal_error)
+        self.assertEqual(self.app.journal.__class__.__name__, "NativeJournalSource")
         self.assertEqual(self.preview()["source"], "market")
-        self.error("journal_config", "GET", "/api/trades")
+        self.assertEqual((self.directory / "journal.json").read_text(), '{"script_path":"/invalid"}')
         self.error("invalid_settings", "POST", "/api/settings", {"script_path": "/unsafe"})
 
     def test_bridge_port_change_replaces_only_future_market_source(self):
@@ -434,11 +435,13 @@ class WorkflowTests(unittest.TestCase):
         else:
             self.fail("Malformed preview ID was accepted")
 
-    def test_null_optional_journal_config_is_invalid_not_silently_unconfigured(self):
+    def test_legacy_null_config_is_retained_and_native_is_default(self):
         self.app.close()
         (self.directory / "journal.json").write_text("null")
         self.app = Workbench(self.directory, market=self.market, provider=self.provider, vault=self.vault)
-        self.assertEqual(self.call("GET", "/api/status")["journal"]["reason"], "journal_config")
+        self.assertIsNone(self.app._journal_error)
+        self.assertEqual(self.app.journal.__class__.__name__, "NativeJournalSource")
+        self.assertEqual((self.directory / "journal.json").read_text(), "null")
 
     def test_followup_oversize_preserves_existing_history_and_does_not_call_provider(self):
         self.provider.result = {"text": "x" * 196608 + "[E:candles]"}

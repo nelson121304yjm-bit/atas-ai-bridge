@@ -60,7 +60,7 @@ class McpSmokeTests(unittest.TestCase):
             send({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
             names = {tool["name"] for tool in receive(2)["tools"]}
             self.assertTrue({"atas_status", "atas_dom", "atas_footprint", "atas_cvd",
-                             "atas_profile", "atas_get_settings"}.issubset(names), names)
+                             "atas_profile", "atas_get_settings", "atas_native_journal", "atas_native_trade_evidence"}.issubset(names), names)
             self.assertFalse(names & {"atas_place_order", "atas_cancel_order", "atas_close_position"})
         finally:
             proc.stdin.close()

@@ -23,13 +23,14 @@ class LaunchTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.state = Path(temporary.name) / "state"
         self.urls = Path(temporary.name) / "urls"
+        self.env = {**os.environ, "ATAS_AI_BRIDGE_PORT": "1"}
 
     def launch(self, destination, bridge_port=None):
         command = [sys.executable, "-m", "companion.launch", "--state-dir",
                    str(self.state), "--url-file", str(destination)]
         if bridge_port is not None:
             command.extend(["--bridge-port", str(bridge_port)])
-        return subprocess.run(command, cwd=ROOT,
+        return subprocess.run(command, cwd=ROOT, env=self.env,
                               capture_output=True, text=True, timeout=10)
 
     def status_from_url(self, url):
@@ -71,7 +72,7 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(first.returncode, 0, first.stderr)
         metadata = json.loads((self.state / "runtime.json").read_text())
         self.addCleanup(lambda: self.stop(metadata["pid"]))
-        self.assertIsNone(self.status_from_url(self.urls.read_text().strip())["bridgePort"])
+        self.assertEqual(self.status_from_url(self.urls.read_text().strip())["bridgePort"], 1)
         for bridge_port in (34000, 34001):
             with self.subTest(bridge_port=bridge_port):
                 result = self.launch(self.urls, bridge_port)
@@ -87,7 +88,7 @@ class LaunchTests(unittest.TestCase):
     def test_native_json_has_clean_root_and_one_use_bootstrap(self):
         command = [sys.executable, "-m", "companion.launch", "--state-dir", str(self.state),
                    "--native-json", "--bridge-port", "8790"]
-        first = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, timeout=10)
+        first = subprocess.run(command, cwd=ROOT, env=self.env, capture_output=True, text=True, timeout=10)
         self.assertEqual(first.returncode, 0, first.stderr)
         self.assertEqual(first.stderr, "")
         native = json.loads(first.stdout)

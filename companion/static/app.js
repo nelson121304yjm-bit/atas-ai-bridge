@@ -34,9 +34,9 @@ async function refreshStatus(adoptJob = false) {
   try {
     const status = await api("/api/status");
     updateStatus(status);
-    updateJournalStatus(status.journal);
+    const journalChanged = updateJournalStatus(status.journal);
     const connected = status.journal?.connected === true;
-    if (connected && lastJournalConnected !== true) await refreshTrades();
+    if (connected && (lastJournalConnected !== true || journalChanged)) await refreshTrades();
     lastJournalConnected = connected;
     if (adoptJob && status.active_job && !jobIsActive()) watchJob(status.active_job);
     return status;

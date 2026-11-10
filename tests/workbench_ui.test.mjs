@@ -396,3 +396,48 @@ test("workbench UI regressions", async t => {
     assert.equal(get("profile-save").disabled, false);
   });
 });
+
+
+test("native journal local detail needs no model and source changes discard pending UI results", async () => {
+  const {initJournal, updateJournalStatus, refreshTrades} = await import("../companion/static/journal.js");
+  const get = fakeDocument();
+  get("source").value = "trade";
+  initJournal(() => {});
+  updateJournalStatus({connected: false});
+  updateJournalStatus({connected: true, origin_key: "origin-a"});
+  const item = {trade_id: "a".repeat(64), native_id: "7", instrument: "BTCUSDT@BinanceFutures",
+    is_complete: true, side: null, open_time: {iso: "2026-11-09T10:00:00", kind: "Unspecified"},
+    close_time: {iso: "2026-11-09T10:01:00", kind: "Unspecified"}, open_price: "12345.123456789012345678",
+    close_price: "12346.123456789012345678", open_volume: "0.000000000000000123", close_volume: "0.000000000000000100",
+    pnl: "-0.00000000000000000123", commission: null};
+  const listed = {data: {simulation_only: true, origin_key: "origin-a", trades: [item], returned: 1,
+    coverage: {from: item.open_time, to: item.close_time, incomplete_rows: 0}}};
+  const requests = [];
+  globalThis.fetch = async path => {
+    requests.push(path);
+    if (path === "/api/trades") return reply(listed);
+    assert.equal(path, `/api/trades/${item.trade_id}/evidence`);
+    return reply({evidence: {source: "trade", quality: ["native_timezone_unknown"], evidence: {pnl: item.pnl}}});
+  };
+  await refreshTrades();
+  assert.equal(get("trade-id").children.length, 1);
+  const row = get("trade-list").children.find(child => child.tag === "article");
+  const text = row.children[0].children.map(child => child.textContent).join(" ");
+  assert.match(text, /12345\.123456789012345678/);
+  assert.match(text, /-0\.00000000000000000123/);
+  assert.match(text, /手续费 缺失/);
+  assert.match(text, /Unspecified/);
+  await row.children[1].children[0].emit("click");
+  assert.match(get("trade-evidence").textContent, /native_timezone_unknown/);
+  assert.equal(requests.length, 2);
+  assert.equal(requests.some(path => /preview|analyze|settings/.test(path)), false);
+  let release;
+  globalThis.fetch = async () => new Promise(resolve => { release = resolve; });
+  const pending = refreshTrades();
+  updateJournalStatus({connected: true, origin_key: "origin-b"});
+  release(reply(listed)); await pending;
+  assert.equal(get("trade-id").children.length, 0);
+  assert.equal(get("trade-list").children.length, 0);
+  assert.equal(get("trade-evidence").textContent, "");
+  assert.equal(get("preview-button").disabled, true);
+});

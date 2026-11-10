@@ -80,7 +80,7 @@ class MarketSource:
 
     def _get(self, path: str):
         # Fixed paths and numeric loopback avoid URL input, proxies, and redirects.
-        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10 if path == "/api/journal" else 5)
         try:
             connection.request("GET", path, headers={"Accept": "application/json"})
             response = connection.getresponse()
@@ -97,6 +97,10 @@ class MarketSource:
             raise AppError("bridge_response_too_large", "ATAS response exceeds 3 MiB.", 502)
         value = _decode(raw)
         if isinstance(value, dict) and value.get("ok") is False:
+            if path == "/api/journal" and value.get("code") in {
+                    "native_history_start_failed", "native_history_load_failed",
+                    "native_history_snapshot_failed", "native_origin_changed"}:
+                raise AppError(value["code"], "Native journal read failed at the reported stage; no alternate source was used.", 502)
             raise AppError("bridge_endpoint_error", "ATAS endpoint has no usable data.", 502)
         return value, utc_now()
 

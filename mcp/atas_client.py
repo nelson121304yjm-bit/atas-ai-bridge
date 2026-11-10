@@ -145,6 +145,38 @@ class AtasBridgeClient:
     def log(self, lines: int | None = None) -> dict:
         return self._request("/api/log", {"lines": lines})
 
+    def _native_source(self):
+        if self.host != "127.0.0.1":
+            raise BridgeError("Native journal requires the same numeric loopback bridge source.")
+        # Same fixed port, no rediscovery/fallback during a journal read.
+        import sys
+        from pathlib import Path
+        root = str(Path(__file__).resolve().parents[1])
+        if root not in sys.path:
+            sys.path.insert(0, root)
+        from companion.evidence import MarketSource
+        from companion.native_journal import NativeJournalSource
+        existing = getattr(self, "_journal", None)
+        if existing is None or existing.market.port != self.port:
+            if existing is not None:
+                existing.invalidate()
+            self._journal = NativeJournalSource(MarketSource(port=self.port))
+        return self._journal
+
+    def _native_read(self, trade_id=None):
+        source = self._native_source()
+        result = source.list_trades() if trade_id is None else source.capture(trade_id)
+        if source is not self._journal or source.market.port != self.port:
+            source.invalidate()
+            raise BridgeError("Native journal source changed; refresh the list.")
+        return result
+
+    def native_journal(self) -> dict:
+        return self._native_read()
+
+    def native_trade_evidence(self, trade_id: str) -> dict:
+        return self._native_read(trade_id)
+
     # ---- settings (read + write) ----------------------------------------
     def settings(self) -> dict:
         return self._request("/api/settings")

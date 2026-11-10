@@ -60,25 +60,16 @@ bash install-workbench.sh --install --python /absolute/path/to/python3.12
 `--python` 可省略，此时使用 `python3`，但版本必须为 3.12 或更高。
 安装器在 `~/Library/Application Support/ATAS AI Review` 建立专用 `.venv`、
 只含本机配置的 `installation.json` 和可双击的 `Open ATAS AI Review.command`。
-它不下载模型依赖、不安装 ATAS 指标，也不重启 ATAS。首次启动在指标设置点击
-**Open AI review tab**，打开宿主原生可停靠标签页；图上按钮/状态新实例默认隐藏。
-也可双击该 `.command` 文件手动打开浏览器；多次打开会复用现有本机后台。
-原生限制、认证边界和待验收项目见 [原生验证记录](validation/2026-11-09-native-review-dock.md)。
+它不下载模型依赖、不安装 ATAS 指标，也不重启 ATAS。双击该 `.command` 文件打开已验证的
+浏览器工作台；多次打开复用现有本机后台。原生 dock 入口仍属实验、尚未完成 ATAS 内部验收，
+本次流程不依赖它。
 
-可选接入已有**模拟交易日志**，四个参数必须同时给出，且指向现有文件：
-
-```bash
-bash install-workbench.sh --install \
-  --journal-python /absolute/path/to/python3.12 \
-  --journal-script /absolute/path/to/journal-server.py \
-  --journal-db /absolute/path/to/existing-journal.sqlite \
-  --journal-account YOUR_SIM_ACCOUNT_ID
-```
-
-这四项仅写入权限为 `0600` 的 `journal.json`，页面不能修改可执行程序或数据库路径。
-脚本不会查找私有日志、自动创建数据库或读取模型密钥。再次安装且未给出日志参数时，
-原 `journal.json` 保留；显式使用 `--disable-journal` 才移除这个适配器配置，
-不会删除独立日志数据库。未配置或配置失效时“交易日志”显示未连接，行情分析仍可用。
+工作台默认通过同一行情桥读取当前模拟账户的 ATAS 原生 BTCUSDT 日志；最近七天最多 100 条。
+“查看本地证据”无需配置模型，保留配对行、十进制字符串、可空手续费和原始时间 Kind。
+分批平仓不合并；净收益／币种／单位／历史盘口／初始风险／MAE／MFE 不推断。
+旧记录器和 `journal.json` 配置／数据库保留；原有安装器 `--journal-*` 参数仅管理旧配置，
+不改变原生默认来源。`--disable-journal` 只移除旧配置，不删除数据库。
+详情见 [工作台指南](workbench.md#atas-原生模拟交易日志)。
 
 “模型设置”填写完整 Base URL、模型名与用户自己的 Key。Key 默认只在本次后台会话中；
 勾选后才存入 macOS Keychain。改变服务地址后必须重新输入该地址的 Key。
@@ -198,7 +189,7 @@ PY
 > 若没有独立成交日志，不推断我的入场、出场、盈亏或执行质量。只读分析，不执行交易。
 
 例如：`检查当前 BTCUSDT 的数据质量，然后解释最近 5 根已闭合 M5 K 线的价格与 Delta 是否一致。`
-复盘个人交易时还需要单独的交易日志 MCP；仅连接这个行情桥不能获得手动成交历史。
+Mac 0.5 指标通过公开原生日志 API 读取当前 BTC 模拟账户的配对历史；无需额外记录器 MCP。
 
 **不要把 `mcp/verify.py` 当成纯只读检查**：它会测试设置写入并尝试恢复。
 本指南的初始检查只读取 health/status，不发送订单或修改设置。
@@ -239,6 +230,6 @@ dotnet run --project tests/host_contract -- out/ATAS.AiBridge.dll \
 Windows 行为有路径和条件编译回归测试，但没有在 Windows 主机上运行完整构建／平台测试。
 Mac 指标不提供账户持仓；Windows 上游策略的
 仓位仍只统计策略自身成交，不包括手动成交。
-当前 0.4 工作台已实现可选只读模拟日志、系统／Prompt 版本与按需复盘流程；
+当前 0.5 工作台默认读取同一桥的 ATAS 原生模拟日志，保留系统／Prompt 版本与按需复盘流程；
 其自动化、合成浏览器验证及尚待完成的实际图表入口／实时采集，
 以 [工作台验证记录](validation/2026-11-09-workbench.md) 为准。

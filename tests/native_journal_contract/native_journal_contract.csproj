@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>disable</Nullable>
+    <DefineConstants>MAC_INDICATOR</DefineConstants>
+    <ATAS_BASE Condition="'$(ATAS_BASE)' == ''">/Applications/ATAS X.app/Contents/MonoBundle</ATAS_BASE>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/ATAS.AiBridge/NativeJournal.cs" Link="NativeJournal.cs" />
+    <Reference Include="ATAS.DataFeedsCore;ATAS.Indicators;Utils.Common"><HintPath>$(ATAS_BASE)/%(Identity).dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>

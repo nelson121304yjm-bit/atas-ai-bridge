@@ -71,6 +71,7 @@ class HttpTests(unittest.TestCase):
 
     def test_api_requires_session_and_bootstrap_is_one_use(self):
         self.assertEqual(self.request("GET", "/api/status")[0], 401)
+        self.assertEqual(self.request("GET", "/api/trades/" + "a" * 64 + "/evidence")[0], 401)
         token, headers, payload = self.bootstrap()
         self.assertIn("HttpOnly", headers["Set-Cookie"])
         self.assertIn("SameSite=Strict", headers["Set-Cookie"])
