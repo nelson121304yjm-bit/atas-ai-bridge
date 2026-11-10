@@ -195,6 +195,36 @@ class NativeJournalTests(unittest.TestCase):
                     self.assertEqual(self.error(lambda: app._journal_read(key)), "native_journal_selection")
                 finally:
                     app.close()
+    def test_mcp_list_projects_private_ids_but_keys_still_resolve_native_evidence(self):
+        spec = importlib.util.spec_from_file_location("_native_privacy_client", Path(__file__).resolve().parents[1] / "mcp/atas_client.py")
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        self.market.rows[0]["native_id"] = "private-native-row-one"
+        self.market.rows[1]["native_id"] = "private-native-row-two"
+        client = module.AtasBridgeClient(port=self.market.port, host="127.0.0.1")
+        with patch("companion.evidence.MarketSource", return_value=self.market):
+            listed = client.native_journal()
+            raw = encode_json(listed).decode()
+            for private in ("account_id", "native_id", "entry_ref", "exit_ref", "SYNTHETIC_SIM",
+                            "private-native-row-one", "private-native-row-two", "private-entry", "private-exit"):
+                self.assertNotIn(private, raw)
+            first = listed["trades"][0]
+            self.assertEqual(first["granularity"], "native_paired_row")
+            self.assertEqual(first["pnl"], self.market.rows[0]["pnl"])
+            self.assertEqual(first["open_time"], self.market.rows[0]["open_time"])
+            self.assertIsNone(first["commission"])
+            self.assertEqual(listed["quality"], QUALITY)
+            self.assertEqual(listed["coverage"]["returned"], 2)
+            evidence = client.native_trade_evidence(first["trade_id"])
+            self.assertEqual(evidence["source"], "trade")
+            self.assertEqual(evidence["evidence"]["native_trade"]["data"]["pnl"], first["pnl"])
+            # Projection does not remove local reconciliation identifiers or mutate cached native rows.
+            local = client._journal.list_trades()
+            self.assertEqual(local["trades"][0]["native_id"], "private-native-row-one")
+            self.assertEqual(local["trades"][0]["account_id"], "SYNTHETIC_SIM")
+            self.assertEqual(local["trades"][0]["entry_ref"], "private-entry")
+            first["open_time"]["iso"] = "mutated-model-output"
+            self.assertNotEqual(client._journal._selection[first["trade_id"]]["open_time"]["iso"], "mutated-model-output")
+
     def test_mcp_uses_same_scope_and_rejects_midflight_port_change(self):
         spec = importlib.util.spec_from_file_location("_native_test_client", Path(__file__).resolve().parents[1] / "mcp/atas_client.py")
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)

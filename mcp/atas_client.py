@@ -10,6 +10,7 @@ Port discovery order:
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 import sys
@@ -172,7 +173,16 @@ class AtasBridgeClient:
         return result
 
     def native_journal(self) -> dict:
-        return self._native_read()
+        value = self._native_read()
+        from companion.native_journal import FACTS
+        # The authenticated workbench retains native IDs for local reconciliation.
+        # MCP is model-facing: publish only selection keys and the same safe facts as evidence.
+        fields = ("trade_id", "instrument", "status", "granularity", *FACTS)
+        return deepcopy({
+            "source": value["source"], "simulation_only": value["simulation_only"],
+            "coverage": value["coverage"], "quality": value["quality"], "returned": value["returned"],
+            "trades": [{key: row[key] for key in fields} for row in value["trades"]],
+        })
 
     def native_trade_evidence(self, trade_id: str) -> dict:
         return self._native_read(trade_id)
