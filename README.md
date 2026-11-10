@@ -61,7 +61,16 @@ atas-ai-bridge/
 
 ### macOS / ATAS X
 
-需要安装 **ATAS X、.NET 10 SDK 和 Python 3.12+**（本机工作台）。在项目根目录运行：
+**只做原生交易日志复盘：不需要安装指标，也不需要 .NET SDK。** 使用已有 ATAS 本机记录和 Python 3.12+，在项目根目录运行：
+
+```bash
+bash install-workbench.sh --install
+```
+
+然后双击 `~/Library/Application Support/ATAS AI Review/Open ATAS AI Review.command`。
+默认进入本机交易日志，可以直接查看已有模拟配对记录和本地证据。只有需要让AI客户端通过MCP读取时，才另外运行 `bash mcp/setup-venv.sh` 并重新连接该客户端的MCP服务。
+
+**可选的实时行情桥**才需要 ATAS X、.NET 10 SDK 和图表指标。在项目根目录运行：
 
 ```bash
 bash build.sh                   # 只构建，不修改 ATAS
@@ -98,7 +107,7 @@ MCP 会从 macOS 的 Application Support 目录自动发现桥端口。
 复用用户本地选择；只返回不透明交易键和去身份事实，不启动后台、桥或模型。
 自定义工作台状态目录可通过 MCP 进程的 `ATAS_REVIEW_STATE_DIR` 指定。
 原 `atas_native_journal` 与 `atas_native_trade_evidence` 继续明确使用可选的同图表公开 API 来源，不自动回退。
-[原生日志验证记录](docs/validation/2026-11-10-native-trade-journal.md) 区分合成测试、SDK 构建和待实机对账；
+[原生日志验证记录](docs/validation/2026-11-10-native-trade-journal.md) 区分合成测试、SDK 构建、本机记录对账和未验收入口；
 [原生 dock 记录](docs/validation/2026-11-09-native-review-dock.md) 保留原有实验状态。
 Windows 行情继续使用原有策略流程；本机文件适配器仅接受上述已确认的 CSV 容器版本与字段，未知格式明确拒绝。
 
