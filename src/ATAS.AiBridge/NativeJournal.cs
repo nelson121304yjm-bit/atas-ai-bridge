@@ -173,7 +173,18 @@ public partial class AiBridgeStrategy
                     _journalSecurity != NativeJournalDto.SecurityId || _journalProvider == null)
                 { Finish(Error("Select a simulation account and BTCUSDT@BinanceFutures on this indicator.")); return "{}"; }
                 var scope = _journalScope; var account = _journalAccount; var provider = _journalProvider;
+                var selectionEpoch = Interlocked.Read(ref _journalSelectionEpoch);
                 var server = _server; var port = server?.Port ?? 0;
+                bool OriginUnchanged()
+                {
+                    // Do not reattach selection subscriptions after disposal.
+                    if (_indicatorDisposed) return false;
+                    ObserveJournalScope();
+                    return !_indicatorDisposed && Volatile.Read(ref expired) == 0 && _hostRunning &&
+                        ReferenceEquals(server, _server) && scope == _journalScope &&
+                        selectionEpoch == Interlocked.Read(ref _journalSelectionEpoch) &&
+                        ReferenceEquals(provider, _journalProvider) && Portfolio?.IsRealAccount == false;
+                }
                 var to = DateTime.Now; var from = to.AddDays(-days);
                 Task<ITradingStatistics> load;
                 try { load = provider.LoadHistoryAsync(from, to, new[] { account }, new[] { NativeJournalDto.SecurityId })
@@ -186,9 +197,7 @@ public partial class AiBridgeStrategy
                     { Finish(Error("Native history request expired or origin stopped.")); return; }
                     Enqueue(() => {
                         try {
-                            ObserveJournalScope();
-                            if (_indicatorDisposed || Volatile.Read(ref expired) != 0 || scope != _journalScope ||
-                                !ReferenceEquals(server, _server) || !_hostRunning || Portfolio?.IsRealAccount != false)
+                            if (!OriginUnchanged())
                             { Finish(Failure("native_origin_changed", "Native journal origin changed.")); return "{}"; }
                             var statistics = task.Result ?? throw new InvalidOperationException("Native history unavailable.");
                             var dto = NativeJournalDto.Build(statistics.HistoryMyTrades, statistics.MyTrades, account, from, to, days, limit);
@@ -196,7 +205,12 @@ public partial class AiBridgeStrategy
                             dto["origin"] = new { instance_id = _journalInstance, scope_id = scope, port,
                                 account_id = account, security_id = NativeJournalDto.SecurityId,
                                 account_is_real = false, host_mode = "indicator" };
-                            Finish(JsonSerializer.Serialize(dto, JsonOpts));
+                            var json = JsonSerializer.Serialize(dto, JsonOpts);
+                            // SDK enumeration and serialization can run selection/lifetime callbacks.
+                            // Validate the original epoch and source after both, immediately before publication.
+                            if (!OriginUnchanged())
+                            { Finish(Failure("native_origin_changed", "Native journal origin changed.")); return "{}"; }
+                            Finish(json);
                         } catch { Finish(Failure("native_history_snapshot_failed", "Native journal snapshot failed.")); }
                         return "{}";
                     });

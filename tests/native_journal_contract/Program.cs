@@ -45,13 +45,20 @@ static class Fixtures
     static JsonElement Build(HistoryMyTrade[] rows, MyTrade[] fills = null, int limit = 100) =>
         JsonSerializer.SerializeToElement(NativeJournalDto.Build(rows, fills ?? Array.Empty<MyTrade>(),
             "SYNTHETIC_SIM", Now.AddDays(-7), Now.AddHours(1), 7, limit));
-    static IMutableEnumerable<T> Items<T>(T[] rows, int owner) => FixtureProxy.Create<IMutableEnumerable<T>>((m, _) => {
+    static IEnumerable<T> Enumerate<T>(T[] rows, Action duringEnumeration)
+    {
+        foreach (var row in rows) {
+            duringEnumeration?.Invoke();
+            yield return row;
+        }
+    }
+    static IMutableEnumerable<T> Items<T>(T[] rows, int owner, Action duringEnumeration = null) => FixtureProxy.Create<IMutableEnumerable<T>>((m, _) => {
         Check(Environment.CurrentManagedThreadId == owner, "SDK collection enumerated only by host pump");
-        if (m.Name == "GetEnumerator") return ((IEnumerable<T>)rows).GetEnumerator();
+        if (m.Name == "GetEnumerator") return Enumerate(rows, duringEnumeration).GetEnumerator();
         throw new Exception("Unexpected collection call " + m.Name);
     });
-    static ITradingStatistics Statistics(HistoryMyTrade[] rows, int owner) => FixtureProxy.Create<ITradingStatistics>((m, _) =>
-        m.Name == "get_HistoryMyTrades" ? Items(rows, owner) :
+    static ITradingStatistics Statistics(HistoryMyTrade[] rows, int owner, Action duringEnumeration = null) => FixtureProxy.Create<ITradingStatistics>((m, _) =>
+        m.Name == "get_HistoryMyTrades" ? Items(rows, owner, duringEnumeration) :
         m.Name == "get_MyTrades" ? Items(Array.Empty<MyTrade>(), owner) : throw new Exception("Unexpected statistics access"));
 
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
@@ -142,6 +149,34 @@ static class Fixtures
             if (changed != "dispose") AwaitFinal(host);
             else Check(host.TestSubscriptionCount == 0, "disposal detaches public selection notifications");
             Check(read.Wait(2000) && !JsonDocument.Parse(read.Result).RootElement.GetProperty("ok").GetBoolean(), changed + " rejects late result");
+        }
+        foreach (var changed in new[] { "account-away-back", "security-away-back", "dispose", "server", "provider" }) {
+            var host = Host(); var read = Begin(host);
+            var invoked = 0;
+            pending.SetResult(Statistics(new[] { Row() }, owner, () => {
+                invoked++;
+                if (changed == "account-away-back") {
+                    var original = host.TestPortfolio;
+                    host.TestPortfolio = new Portfolio { AccountID = "OTHER_SIM" };
+                    host.TestPortfolio = original;
+                }
+                if (changed == "security-away-back") {
+                    host.TestSecurity = "ETHUSDT@BinanceFutures";
+                    host.TestSecurity = NativeJournalDto.SecurityId;
+                }
+                if (changed == "dispose") host.TestDispose();
+                if (changed == "server") host.TestReplaceServer();
+                if (changed == "provider") host.TestProvider = FixtureProxy.Create<ITradingStatisticsProvider>((_, _) => null);
+            }));
+            AwaitFinal(host);
+            Check(invoked == 1, changed + " occurs inside SDK enumeration");
+            Check(read.Wait(2000), changed + " during enumeration completes caller");
+            using var rejected = JsonDocument.Parse(read.Result);
+            Check(!rejected.RootElement.GetProperty("ok").GetBoolean() &&
+                rejected.RootElement.GetProperty("code").GetString() == "native_origin_changed",
+                changed + " during enumeration cannot publish old DTO");
+            Check(!rejected.RootElement.TryGetProperty("trades", out _), changed + " rejects data instead of publishing old rows");
+            if (changed == "dispose") Check(host.TestSubscriptionCount == 0, "post-snapshot validation does not resubscribe disposed origin");
         }
         var failed = Host(); var failureRead = Begin(failed); pending.SetException(new InvalidOperationException("synthetic"));
         Check(failureRead.Wait(2000) && failureRead.Result.Contains("failed"), "provider failures fail closed");

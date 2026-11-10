@@ -128,6 +128,25 @@ class NativeJournalTests(unittest.TestCase):
         key = self.source.list_trades()["trades"][0]["trade_id"]
         self.market.rows[0]["pnl"] = "1"
         self.assertEqual(self.error(lambda: self.source.capture(key)), "native_journal_changed")
+    def test_local_fall_back_range_uses_wall_clock_days_and_preserves_raw_times(self):
+        start = nt("2026-10-27T12:00:00-04:00", "Local")
+        end = nt("2026-11-03T12:00:00-05:00", "Local")
+        self.market.rows = [row(open_time=nt("2026-11-03T10:00:00-05:00", "Local"),
+                                close_time=nt("2026-11-03T10:01:00-05:00", "Local"))]
+        def coverage(value):
+            value["coverage"].update({"from": start, "to": end})
+            return value
+        self.market.change = coverage
+        listed = self.source.list_trades()
+        evidence = self.source.capture(listed["trades"][0]["trade_id"])
+        self.assertEqual(evidence["evidence"]["native_coverage"]["data"]["from"], start)
+        self.assertEqual(evidence["evidence"]["native_coverage"]["data"]["to"], end)
+        self.assertEqual(evidence["evidence"]["native_trade"]["data"]["open_time"], self.market.rows[0]["open_time"])
+        for invalid_end in ("2026-11-03T12:00:01-05:00", "2026-10-27T12:00:00-05:00"):
+            with self.subTest(invalid_end=invalid_end):
+                end["iso"] = invalid_end
+                self.assertEqual(self.error(self.source.list_trades), "native_journal_invalid")
+
     def test_malformed_rows_are_rejected_without_coercion(self):
         for change in ({"pnl": 1.1}, {"commission": "NaN"}, {"pnl": "1e-8"}, {"open_volume": "-1"},
                        {"open_time": nt("2026-11-09T10:00:00Z")}, {"side": "Long"},

@@ -143,7 +143,10 @@ class NativeJournalSource:
             raise invalid()
         begin = datetime.fromisoformat(start["iso"].replace("Z", "+00:00"))
         finish = datetime.fromisoformat(end["iso"].replace("Z", "+00:00"))
-        if start["kind"] != end["kind"] or not 0 < (finish - begin).total_seconds() <= 7 * 86400:
+        # Producer uses DateTime.AddDays and row bounds compare native wall-clock ticks.
+        # Preserve ISO offsets/Kind, but do not reinterpret a DST offset change as an extra hour of scope.
+        wall_duration = finish.replace(tzinfo=None) - begin.replace(tzinfo=None)
+        if start["kind"] != end["kind"] or not 0 < wall_duration.total_seconds() <= 7 * 86400:
             raise invalid()
         rows = value.get("trades")
         if not isinstance(rows, list) or len(rows) != coverage["returned"] or len(rows) > coverage["limit"]:
