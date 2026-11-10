@@ -78,13 +78,15 @@ Mac 使用 **AI Bridge — read only 指标**：在图表的指标列表添加�
 不包含下单实现，HTTP 设置写入和账户订单/持仓接口也被拒绝。
 MCP 会从 macOS 的 Application Support 目录自动发现桥端口。
 双击 `~/Library/Application Support/ATAS AI Review/Open ATAS AI Review.command`
-打开已验证的浏览器工作台；首页核对当前图表桥端口与模拟账户。图上按钮／设置中的
+打开已验证的浏览器工作台；默认进入本机交易日志，核对模拟账户和本地快照范围。图上按钮／设置中的
 `Open AI review tab` 原生 dock 入口仍属实验实现，尚未通过 ATAS 内部实机验收，
 本轮不依赖或继续排障该入口。
 
-交易日志默认读取**同一行情桥端口、当前图表模拟账户**的 ATAS 原生
-`BTCUSDT@BinanceFutures` 日志，最近七天、最多 100 条原生配对记录。
-分批平仓保留独立行，不合成整个交易；价格、数量、原生盈亏和可空手续费保留十进制精度。
+交易日志默认只读读取 `~/Library/Application Support/ATAS/Database` 中的
+`Portfolio.cdb`、`HistoryMyTrade.cdb`、`MyTrade.cdb`，**无需图表、指标或行情桥连接**。
+仅可选 `IsRealAccount=False` 且有 `BTCUSDT@BinanceFutures` 原生日志的账户；一个时自动选择，
+多个时须用户在已认证的本机工作台明确选择，不按账户名前缀猜测。最近本机墙钟七天、最多 100 条配对行。
+分批平仓保留独立行；价格、原生有符号数量、原生盈亏和可空手续费保留十进制精度。
 “查看本地证据”无需配置模型；发送仍须“生成发送预览 → 明确点击分析”。
 原生盈亏的费用口径、币种、仓位单位、未知时区，以及历史 DOM／Delta／初始风险／MAE／MFE
 不推断。已有记录器数据和私有 `journal.json` 配置保留，但不再作为默认事实来源。
@@ -92,10 +94,13 @@ MCP 会从 macOS 的 Application Support 目录自动发现桥端口。
 本机工作台的 Python 环境位于私有状态目录的 `.venv`，与 MCP 的 `mcp/.venv` 分开；
 不安装网络依赖。完整 BYOK、预览、原生日志与恢复步骤见
 [工作台指南](docs/workbench.md)，构建和端口见 [macOS 指南](docs/macos.md)。
-只读 MCP 新增 `atas_native_journal` 与 `atas_native_trade_evidence`，使用同样的来源与证据限制。
+只读 MCP `atas_persisted_journal` 与 `atas_persisted_trade_evidence` 读取已运行且已认证的本机工作台，
+复用用户本地选择；只返回不透明交易键和去身份事实，不启动后台、桥或模型。
+自定义工作台状态目录可通过 MCP 进程的 `ATAS_REVIEW_STATE_DIR` 指定。
+原 `atas_native_journal` 与 `atas_native_trade_evidence` 继续明确使用可选的同图表公开 API 来源，不自动回退。
 [原生日志验证记录](docs/validation/2026-11-10-native-trade-journal.md) 区分合成测试、SDK 构建和待实机对账；
 [原生 dock 记录](docs/validation/2026-11-09-native-review-dock.md) 保留原有实验状态。
-Windows 继续使用原有策略流程，本次原生日志端点仅在 Mac 只读指标提供。
+Windows 行情继续使用原有策略流程；本机文件适配器仅接受上述已确认的 CSV 容器版本与字段，未知格式明确拒绝。
 
 ### Windows（原有流程）
 

@@ -441,3 +441,37 @@ test("native journal local detail needs no model and source changes discard pend
   assert.equal(get("trade-evidence").textContent, "");
   assert.equal(get("preview-button").disabled, true);
 });
+
+test("persisted journal chooses accounts explicitly and keeps native signed quantities", async () => {
+  const {initJournal, updateJournalStatus} = await import("../companion/static/journal.js");
+  const get = fakeDocument();
+  get("source").value = "trade";
+  initJournal(() => {});
+  updateJournalStatus({connected: false, reason: "native_account_selection_required", selection_required: true,
+    account_options: [{key: "a".repeat(64), label: "模拟账户 1"}, {key: "b".repeat(64), label: "模拟账户 2"}]});
+  assert.equal(get("journal-account-form").hidden, false);
+  assert.equal(get("journal-account").children.length, 3);
+  assert.match(get("journal-state").textContent, /明确选择/);
+  const requests = [];
+  globalThis.fetch = async (path, options) => {
+    requests.push([path, options]);
+    if (path === "/api/journal/account") {
+      assert.deepEqual(JSON.parse(options.body), {account_key: "b".repeat(64)});
+      return reply({journal: {connected: true, origin_key: "persisted", selected_account_key: "b".repeat(64)}});
+    }
+    assert.equal(path, "/api/trades");
+    return reply({data: {simulation_only: true, origin_key: "persisted", returned: 1, trades: [{trade_id: "c".repeat(64),
+      instrument: "BTCUSDT@BinanceFutures", is_complete: true, open_volume: "-3", close_volume: "1", side: "Sell"}],
+      coverage: {file_modified_at: {Portfolio: "2026-11-10T00:00:00+00:00"}}}});
+  };
+  get("journal-account").value = "b".repeat(64);
+  await get("journal-account-form").emit("submit");
+  assert.deepEqual(requests.map(([path]) => path), ["/api/journal/account", "/api/trades"]);
+  const row = get("trade-list").children.find(child => child.tag === "article");
+  assert.match(row.children[0].children.map(child => child.textContent).join(" "), /原生有符号数量 -3/);
+  assert.match(get("journal-state").textContent, /独立于图表和行情桥/);
+  const html = fs.readFileSync(new URL("../companion/static/index.html", import.meta.url), "utf8");
+  assert.match(html, /class="tab is-active" data-tab="journal" aria-current="page"/);
+  assert.match(html, /<section id="analysis" class="page" hidden/);
+  assert.match(html, /<option value="trade">本机原生配对记录<\/option><option value="market">/);
+});

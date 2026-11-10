@@ -169,7 +169,7 @@ class NativeJournalSource:
             for key in DECIMALS:
                 decimal_string(row[key], nullable=key == "commission")
             native_time(row["open_time"]); native_time(row["close_time"])
-            if any(Decimal(row[key]) < 0 for key in ("open_price", "close_price", "open_volume", "close_volume")):
+            if any(Decimal(row[key]) < 0 for key in ("open_price", "close_price")):
                 raise invalid()
             time_value = row["close_time"]["iso"] or row["open_time"]["iso"]
             if time_value is None:

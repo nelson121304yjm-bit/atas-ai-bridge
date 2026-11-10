@@ -360,7 +360,7 @@ class WorkflowTests(unittest.TestCase):
         self.app = Workbench(self.directory, market=self.market, provider=self.provider, vault=self.vault)
         self.configure()
         self.assertIsNone(self.app._journal_error)
-        self.assertEqual(self.app.journal.__class__.__name__, "NativeJournalSource")
+        self.assertEqual(self.app.journal.__class__.__name__, "NativeFileJournalSource")
         self.assertEqual(self.preview()["source"], "market")
         self.assertEqual((self.directory / "journal.json").read_text(), '{"script_path":"/invalid"}')
         self.error("invalid_settings", "POST", "/api/settings", {"script_path": "/unsafe"})
@@ -440,7 +440,7 @@ class WorkflowTests(unittest.TestCase):
         (self.directory / "journal.json").write_text("null")
         self.app = Workbench(self.directory, market=self.market, provider=self.provider, vault=self.vault)
         self.assertIsNone(self.app._journal_error)
-        self.assertEqual(self.app.journal.__class__.__name__, "NativeJournalSource")
+        self.assertEqual(self.app.journal.__class__.__name__, "NativeFileJournalSource")
         self.assertEqual((self.directory / "journal.json").read_text(), "null")
 
     def test_followup_oversize_preserves_existing_history_and_does_not_call_provider(self):

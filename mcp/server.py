@@ -141,6 +141,16 @@ def atas_native_trade_evidence(trade_id: str) -> dict[str, Any]:
     return _guard(lambda: _client.native_trade_evidence(trade_id))
 
 
+@server.tool(description="只读：已有本机工作台的 ATAS 落盘模拟 BTC 原生配对日志，独立于图表和桥端口。最近7天最多100条；多账户须用户先在认证工作台选择。不启动工作台或桥、不调用模型。")
+def atas_persisted_journal() -> dict[str, Any]:
+    return _guard(_client.persisted_journal)
+
+
+@server.tool(description="只读：上次落盘日志列表不透明键对应的单条历史证据，重新验证来源与原生行。无账户ID、成交引用、路径、注释或凭据；不推断当前状态、净PnL、单位或历史DOM/Delta。")
+def atas_persisted_trade_evidence(trade_id: str) -> dict[str, Any]:
+    return _guard(lambda: _client.persisted_trade_evidence(trade_id))
+
+
 # ---------------------------------------------------------------------------
 # 设置（读写；0.2.0 新增）
 # ---------------------------------------------------------------------------

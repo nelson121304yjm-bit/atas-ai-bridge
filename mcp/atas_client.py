@@ -187,6 +187,111 @@ class AtasBridgeClient:
     def native_trade_evidence(self, trade_id: str) -> dict:
         return self._native_read(trade_id)
 
+    def _persisted_request(self, path):
+        """Authenticate to an existing workbench only; never launch/reconfigure a bridge."""
+        import http.client
+        from http.cookies import SimpleCookie
+        from pathlib import Path
+        import re
+        import stat
+        state = Path(os.environ.get("ATAS_REVIEW_STATE_DIR", str(Path.home() / "Library" / "Application Support" / "ATAS AI Review")))
+        unavailable = "Local persisted journal workbench is unavailable. Open the local workbench launcher; no chart indicator is required."
+        try:
+            runtime = state / "runtime.json"
+            info = runtime.lstat()
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 4096 or info.st_mode & 0o077 or info.st_uid != os.getuid():
+                raise ValueError()
+            descriptor = os.open(runtime, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            with os.fdopen(descriptor, "rb") as handle:
+                opened = os.fstat(handle.fileno())
+                if (opened.st_dev, opened.st_ino) != (info.st_dev, info.st_ino):
+                    raise ValueError()
+                metadata = json.loads(handle.read(4097))
+            port, token = metadata["port"], metadata["control_token"]
+            if type(port) is not int or not 8770 <= port <= 8780 or not isinstance(token, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
+                raise ValueError()
+            identity = (port, token)
+            if getattr(self, "_persisted_identity", None) != identity:
+                self._persisted_cookie = None
+                self._persisted_keys = set()
+                self._persisted_identity = identity
+                if path != "/api/trades":
+                    raise BridgeError("The local workbench session changed; list and select a trade again.")
+
+            def request(method, route, payload=None, headers=None):
+                connection = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+                try:
+                    body = json.dumps(payload) if payload is not None else None
+                    connection.request(method, route, body=body, headers=headers or {})
+                    response = connection.getresponse()
+                    raw = response.read(196609)
+                    cookie = response.getheader("Set-Cookie")
+                    if len(raw) > 196608 or response.status != 200:
+                        if response.status == 401:
+                            self._persisted_cookie = None
+                            self._persisted_keys = set()
+                        raise BridgeError("Local persisted journal request failed; refresh the local workbench and select a simulated account if required.")
+                    return json.loads(raw), cookie
+                finally:
+                    connection.close()
+
+            if not getattr(self, "_persisted_cookie", None):
+                issued, _ = request("POST", "/__launcher/issue", {}, {"Content-Type": "application/json", "X-Launcher-Token": token})
+                _, cookie = request("POST", "/api/bootstrap", {"token": issued["token"]}, {"Content-Type": "application/json"})
+                parsed = SimpleCookie(); parsed.load(cookie or "")
+                self._persisted_cookie = "atas_review=" + parsed["atas_review"].value
+            # Only these authenticated GET routes are exposed by the persisted MCP tools.
+            value, _ = request("GET", path, headers={"Cookie": self._persisted_cookie})
+            after = runtime.lstat()
+            if (after.st_dev, after.st_ino, after.st_mtime_ns, after.st_ctime_ns, after.st_size) != (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns, info.st_size):
+                self._persisted_cookie = None
+                self._persisted_keys = set()
+                raise BridgeError("The local workbench changed during the read; list and select again.")
+            return value
+        except BridgeError:
+            raise
+        except (OSError, ValueError, KeyError, TypeError, http.client.HTTPException):
+            self._persisted_cookie = None
+            self._persisted_keys = set()
+            raise BridgeError(unavailable) from None
+
+    @staticmethod
+    def _persisted_coverage(value):
+        fields = ("mode", "from", "to", "days", "limit", "returned", "total_scope_rows", "truncated", "incomplete_rows", "server_history_complete", "live_account_state")
+        result = {key: deepcopy(value[key]) for key in fields}
+        result["file_modified_at"] = {key: value["file_modified_at"][key] for key in ("Portfolio", "HistoryMyTrade", "MyTrade")}
+        return result
+
+    def persisted_journal(self) -> dict:
+        self._persisted_keys = set()
+        value = self._persisted_request("/api/trades")["data"]
+        if value.get("source") != "atas_native_persisted_journal" or value.get("simulation_only") is not True:
+            raise BridgeError("The workbench must use its local persisted simulated journal source.")
+        # Explicit model boundary: no account options, origins, IDs, refs, comments or paths.
+        facts = ("open_price", "close_price", "open_volume", "close_volume", "pnl", "ticks_pnl", "price_pnl", "commission", "open_time", "close_time", "side", "is_complete", "missing_data_case")
+        fields = ("trade_id", "instrument", "status", "granularity", *facts)
+        trades = [{key: deepcopy(row[key]) for key in fields} for row in value["trades"]]
+        self._persisted_keys = {row["trade_id"] for row in trades}
+        return {"source": value["source"], "simulation_only": True, "coverage": self._persisted_coverage(value["coverage"]),
+                "quality": deepcopy(value["quality"]), "returned": len(trades), "trades": trades}
+
+    def persisted_trade_evidence(self, trade_id: str) -> dict:
+        import re
+        if not isinstance(trade_id, str) or not re.fullmatch(r"[a-f0-9]{64}", trade_id) or trade_id not in getattr(self, "_persisted_keys", set()):
+            raise BridgeError("List the local persisted journal and select one of its opaque trade keys first.")
+        value = self._persisted_request("/api/trades/" + trade_id + "/evidence")["evidence"]
+        if value.get("identity", {}).get("source_detail") != "atas_native_persisted_journal":
+            raise BridgeError("The selected evidence is not from the local persisted source.")
+        facts = ("open_price", "close_price", "open_volume", "close_volume", "pnl", "ticks_pnl", "price_pnl", "commission", "open_time", "close_time", "side", "is_complete", "missing_data_case")
+        identity = ("security_id", "simulation_only", "account_is_real", "source_detail", "granularity")
+        limits = ("evidence_bytes", "historical_only", "current_flatness_verified", "net_pnl", "currency", "position_units", "historical_dom", "historical_delta", "initial_risk", "mae", "mfe")
+        native, coverage = value["evidence"]["native_trade"], value["evidence"]["native_coverage"]
+        return {"schema_version": value["schema_version"], "source": value["source"], "captured_at": value["captured_at"],
+                "identity": {key: value["identity"][key] for key in identity}, "quality": deepcopy(value["quality"]),
+                "limits": {key: value["limits"][key] for key in limits}, "evidence": {
+                    "native_trade": {"retrieved_at": native["retrieved_at"], "data": {key: deepcopy(native["data"][key]) for key in facts}},
+                    "native_coverage": {"retrieved_at": coverage["retrieved_at"], "data": self._persisted_coverage(coverage["data"])}}}
+
     # ---- settings (read + write) ----------------------------------------
     def settings(self) -> dict:
         return self._request("/api/settings")

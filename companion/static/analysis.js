@@ -46,12 +46,12 @@ export function selectTrade(id) {
 export function updateStatus(status) {
   const market = status.market || {};
   marketEligible = market.eligible === true;
-  setText("service", status.configured ? "本机服务已连接 · 模型地址已配置（未必已验证）" : "本机服务已连接 · 待配置模型地址");
-  setText("market-status", !market.connected ? "未连接" : marketEligible ? "已连接 · 可采集" : "已连接 · 不可采集");
+  setText("service", status.configured ? "本机服务已连接 · 模型地址已配置（未必已验证）" : "本机服务已连接 · 本地复盘无需模型");
+  setText("market-status", !market.connected ? "未连接 · 可选" : marketEligible ? "已连接 · 可采集" : "已连接 · 不可采集");
   setText("market-detail", `${market.bridge_version || "桥版本未知"}${market.reason ? ` · ${market.reason}` : " · 只读"}`);
-  setText("market-identity", marketEligible ? `${market.instrument || market.security_id} · ${market.account || "模拟账户"}` : "模拟账户未确认");
+  setText("market-identity", marketEligible ? `${market.instrument || market.security_id} · ${market.account || "模拟账户"}` : "行情账户未确认 · 可选");
   const age = market.freshness;
-  setText("market-age", marketEligible ? `${market.chart_type || "图表类型未知"} / ${market.time_frame || "周期未知"} · 快照 ${age?.snapshotAgeMs ?? "?"} ms · 行情事件 ${age?.marketEventAgeMs ?? "?"} ms` : "需检查 ATAS 图表、账户与数据新鲜度");
+  setText("market-age", marketEligible ? `${market.chart_type || "图表类型未知"} / ${market.time_frame || "周期未知"} · 快照 ${age?.snapshotAgeMs ?? "?"} ms · 行情事件 ${age?.marketEventAgeMs ?? "?"} ms` : "本机日志复盘可独立使用；连接行情桥仅用于当前行情分析");
   const journal = status.journal || {};
   setText("journal-status", journal.connected ? "已连接 · 只读" : "未连接");
   setText("journal-detail", journal.connected ? "仅模拟交易" : (journal.reason || "未配置"));

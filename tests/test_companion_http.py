@@ -72,6 +72,8 @@ class HttpTests(unittest.TestCase):
     def test_api_requires_session_and_bootstrap_is_one_use(self):
         self.assertEqual(self.request("GET", "/api/status")[0], 401)
         self.assertEqual(self.request("GET", "/api/trades/" + "a" * 64 + "/evidence")[0], 401)
+        self.assertEqual(self.request("GET", "/api/journal/accounts")[0], 401)
+        self.assertEqual(self.request("POST", "/api/journal/account", "{}")[0], 401)
         token, headers, payload = self.bootstrap()
         self.assertIn("HttpOnly", headers["Set-Cookie"])
         self.assertIn("SameSite=Strict", headers["Set-Cookie"])
@@ -124,6 +126,17 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/api/echo", "{}", {
             "Cookie": cookie, "Content-Type": "application/json", "X-CSRF-Token": payload["csrf"],
             "Origin": "http://127.0.0.1:%d" % self.port})[0], 200)
+
+    def test_local_account_choice_requires_cookie_and_csrf(self):
+        _, headers, payload = self.bootstrap()
+        cookie = headers["Set-Cookie"].split(";", 1)[0]
+        body = json.dumps({"account_key": "a" * 64})
+        before = len(self.calls)
+        self.assertEqual(self.request("POST", "/api/journal/account", body,
+                                    {"Cookie": cookie, "Content-Type": "application/json"})[0], 403)
+        self.assertEqual(len(self.calls), before)
+        self.assertEqual(self.request("POST", "/api/journal/account", body,
+                                    {"Cookie": cookie, "Content-Type": "application/json", "X-CSRF-Token": payload["csrf"]})[0], 200)
 
     def test_rejects_malformed_and_oversized_json_before_handler(self):
         _, headers, payload = self.bootstrap()

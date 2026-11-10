@@ -148,7 +148,7 @@ class NativeJournalTests(unittest.TestCase):
                 self.assertEqual(self.error(self.source.list_trades), "native_journal_invalid")
 
     def test_malformed_rows_are_rejected_without_coercion(self):
-        for change in ({"pnl": 1.1}, {"commission": "NaN"}, {"pnl": "1e-8"}, {"open_volume": "-1"},
+        for change in ({"pnl": 1.1}, {"commission": "NaN"}, {"pnl": "1e-8"}, {"open_price": "-1"},
                        {"open_time": nt("2026-11-09T10:00:00Z")}, {"side": "Long"},
                        {"is_complete": 1}, {"comment": "private"}, {"close_time": nt("2000-01-01T00:00:00")},
                        {"open_time": nt(None)}):
@@ -173,12 +173,19 @@ class NativeJournalTests(unittest.TestCase):
         item = self.source.list_trades()["trades"][0]
         self.assertEqual(item["status"], "incomplete")
         self.assertEqual(self.error(lambda: self.source.capture(item["trade_id"])), "journal_open_trade")
+
+    def test_signed_native_paired_quantities_preserve_explicit_direction(self):
+        for side, opened, closed in (("Buy", "3", "-1"), ("Sell", "-3", "1")):
+            self.market.rows = [row(side=side, open_volume=opened, close_volume=closed)]
+            selected = self.source.list_trades()["trades"][0]
+            facts = self.source.capture(selected["trade_id"])["evidence"]["native_trade"]["data"]
+            self.assertEqual((facts["side"], facts["open_volume"], facts["close_volume"]), (side, opened, closed))
     def test_workbench_default_ignores_and_preserves_legacy_config_and_detail_needs_no_model(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "journal.json"
             config.write_text('{"legacy":"retained"}')
             with patch("companion.app.ProviderClient") as provider:
-                app = Workbench(directory, market=self.market)
+                app = Workbench(directory, market=self.market, journal=NativeJournalSource(self.market))
                 try:
                     listed = app.handle("GET", "/api/trades", {})["data"]
                     key = listed["trades"][0]["trade_id"]
@@ -245,7 +252,7 @@ class NativeJournalTests(unittest.TestCase):
 
     def test_port_switch_during_inflight_capture_cannot_publish_old_evidence(self):
         with tempfile.TemporaryDirectory() as directory:
-            app = Workbench(directory, market=self.market)
+            app = Workbench(directory, market=self.market, journal=NativeJournalSource(self.market))
             try:
                 key = app._journal_read()["trades"][0]["trade_id"]
                 old = app.journal

@@ -10,6 +10,7 @@ from .common import AppError, encode_json, utc_now
 from .credentials import CredentialVault
 from .evidence import MarketSource
 from .native_journal import NativeJournalSource
+from .native_journal_files import NativeFileJournalSource
 from .prompts import (DEFAULT_PROMPT, EXECUTION_RULES, MAX_EVIDENCE_BYTES, TEST_MESSAGES,
                       checked_request, conversation, initial_messages, proposal_messages)
 from .provider import ProviderClient, _validate_key, normalize_base_url
@@ -72,8 +73,10 @@ class Workbench:
         self.vault = vault if vault is not None else CredentialVault()
         self._journal_error = None
         # Retain recorder config/data as an optional legacy source; native is the default.
-        self._native_journal = journal is None
-        self.journal = journal if journal is not None else NativeJournalSource(self.market)
+        self.journal = journal if journal is not None else NativeFileJournalSource()
+        self._native_journal = isinstance(self.journal, NativeJournalSource)
+        self._bridge_journal = isinstance(self.journal, NativeJournalSource) and not isinstance(self.journal, NativeFileJournalSource)
+        self._journal_generation = 0
         self.jobs = Jobs(self._lock)
         self._closed = False
         profile = self.store.profile()
@@ -89,7 +92,7 @@ class Workbench:
             raise AppError("invalid_bridge_port", "Bridge port is invalid.")
         replacement = MarketSource(port=port)
         with self._lock:
-            if self._native_journal:
+            if self._bridge_journal:
                 self.journal.invalidate()
                 self.journal = NativeJournalSource(replacement)
             self.market = replacement
@@ -162,9 +165,10 @@ class Workbench:
         with self._lock:
             self._require_journal()
             journal = self.journal
+            generation = self._journal_generation
         result = journal.list_trades() if trade_id is None else journal.capture(trade_id)
         with self._lock:
-            if self._closed or journal is not self.journal:
+            if self._closed or journal is not self.journal or generation != self._journal_generation:
                 raise AppError("native_journal_changed", "Journal source changed; refresh the list.", 409)
         return result
 
@@ -348,6 +352,8 @@ class Workbench:
                     return {"ok": True, "settings": self._settings()}
             if path == "/api/profile":
                 return {"ok": True, "profile": self.store.profile()}
+            if path == "/api/journal/accounts":
+                return {"ok": True, "journal": self.journal.status()}
             if path == "/api/trades":
                 return {"ok": True, "data": self._journal_read()}
             matched = re.fullmatch(r"/api/trades/([a-f0-9]{64})/evidence", path)
@@ -368,6 +374,13 @@ class Workbench:
                     return {"ok": True, "proposal": self.store.get("proposals", identifier)}
                 return {"ok": True, "job": self.jobs.get(identifier)}
         if method == "POST":
+            if path == "/api/journal/account":
+                _fields(payload, {"account_key"}, {"account_key"})
+                with self._lock:
+                    if not isinstance(self.journal, NativeFileJournalSource):
+                        raise AppError("native_account_selection", "Local persisted journal is not selected.", 409)
+                    self._journal_generation += 1
+                    return {"ok": True, "journal": self.journal.select_account(payload["account_key"])}
             routes = {"/api/settings": self._save_settings, "/api/settings/test": self._test,
                       "/api/preview": self._preview, "/api/analyze": self._analyze, "/api/demo": self._demo}
             if path in routes:
