@@ -18,6 +18,8 @@ function fakeDocument() {
       this.textContent = "";
       this.hidden = false;
       this.disabled = false;
+      this.scrollCalls = [];
+      this.focusCalls = [];
     }
     set id(value) { this._id = value; elements.set(value, this); }
     get id() { return this._id; }
@@ -32,6 +34,8 @@ function fakeDocument() {
     }
     append(...children) { this.children.push(...children); }
     replaceChildren(...children) { this.children = children; }
+    scrollIntoView(options) { this.scrollCalls.push(options); }
+    focus(options) { this.focusCalls.push(options); }
     setAttribute() {}
     querySelector(selector) {
       return selector === "button[type=submit]" ? get("profile-save") : null;
@@ -474,4 +478,40 @@ test("persisted journal chooses accounts explicitly and keeps native signed quan
   assert.match(html, /class="tab is-active" data-tab="journal" aria-current="page"/);
   assert.match(html, /<section id="analysis" class="page" hidden/);
   assert.match(html, /<option value="trade">本机原生配对记录<\/option><option value="market">/);
+});
+
+test("local detail reveals and focuses only the latest current result or error", async () => {
+  const {initJournal, updateJournalStatus, refreshTrades} = await import("../companion/static/journal.js");
+  const get = fakeDocument();
+  initJournal(() => {});
+  updateJournalStatus({connected: true, origin_key: "detail-reveal"});
+  const trades = ["a", "b"].map(id => ({trade_id: id.repeat(64), is_complete: true}));
+  globalThis.fetch = async () => reply({data: {simulation_only: true, origin_key: "detail-reveal", trades}});
+  await refreshTrades();
+  const buttons = get("trade-list").children.filter(child => child.tag === "article").map(row => row.children[1].children[0]);
+  let release;
+  globalThis.fetch = async path => path.includes(trades[0].trade_id)
+    ? new Promise(resolve => { release = resolve; }) : reply({evidence: {result: "latest"}});
+  const pending = buttons[0].emit("click");
+  await buttons[1].emit("click");
+  assert.match(get("trade-evidence").textContent, /latest/);
+  assert.deepEqual(get("trade-evidence").scrollCalls, [{block: "start"}]);
+  assert.deepEqual(get("trade-evidence").focusCalls, [{preventScroll: true}]);
+  release(reply({evidence: {result: "obsolete previous detail"}})); await pending;
+  assert.match(get("trade-evidence").textContent, /latest/);
+  assert.equal(get("trade-evidence").scrollCalls.length, 1);
+  globalThis.fetch = async () => reply({error: {message: "synthetic detail error"}}, 409);
+  await buttons[1].emit("click");
+  assert.match(get("trade-evidence").textContent, /synthetic detail error/);
+  assert.equal(get("trade-evidence").scrollCalls.length, 2);
+  assert.equal(get("trade-evidence").focusCalls.length, 2);
+  globalThis.fetch = async () => new Promise(resolve => { release = resolve; });
+  const stale = buttons[0].emit("click");
+  updateJournalStatus({connected: true, origin_key: "changed-detail-source"});
+  release(reply({evidence: {result: "obsolete source"}})); await stale;
+  assert.equal(get("trade-evidence").textContent, "");
+  assert.equal(get("trade-evidence").scrollCalls.length, 2);
+  assert.equal(get("trade-evidence").focusCalls.length, 2);
+  const html = fs.readFileSync(new URL("../companion/static/index.html", import.meta.url), "utf8");
+  assert.match(html, /id="trade-evidence"[^>]*tabindex="-1"[^>]*aria-label="所选交易的本地证据或错误"/);
 });

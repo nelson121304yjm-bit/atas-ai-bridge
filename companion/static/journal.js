@@ -6,6 +6,14 @@ let connected = false;
 let origin = null;
 let generation = 0;
 let openAnalysis = () => {};
+let detailGeneration = 0;
+
+function revealEvidence(content) {
+  const result = byId("trade-evidence");
+  result.textContent = content;
+  result.scrollIntoView({block: "start"});
+  result.focus({preventScroll: true});
+}
 
 export function updateJournalStatus(status) {
   const next = status?.origin_key || null;
@@ -80,11 +88,12 @@ export async function refreshTrades() {
       const actions = node("div", "actions");
       const detail = node("button", "button secondary", "查看本地证据"); detail.type = "button"; detail.disabled = !eligible;
       detail.addEventListener("click", async () => {
+        const detailRequest = ++detailGeneration;
         detail.disabled = true;
         try {
           const response = await api(`/api/trades/${encodeURIComponent(trade.trade_id)}/evidence`);
-          if (request === generation) setText("trade-evidence", pretty(response.evidence));
-        } catch (error) { if (request === generation) setText("trade-evidence", errorText(error)); }
+          if (request === generation && detailRequest === detailGeneration) revealEvidence(pretty(response.evidence));
+        } catch (error) { if (request === generation && detailRequest === detailGeneration) revealEvidence(errorText(error)); }
         finally { detail.disabled = !eligible; }
       });
       const button = node("button", "button secondary", "用此记录生成预览"); button.type = "button"; button.disabled = !eligible;

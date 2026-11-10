@@ -76,7 +76,7 @@ def parse_container(raw, entity):
 
 
 def wall_time(value):
-    if not value:
+    if not value or value == "01/01/0001 00:00:00":
         return {"iso": None, "kind": "Unspecified"}
     if not re.fullmatch(r"\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}", value):
         raise failure()
@@ -256,29 +256,28 @@ class NativeFileJournalSource(NativeJournalSource):
             facts = {key: number(value[column], quantity=key in ("open_price", "close_price"), nullable=key == "commission")
                      for key, column in (("open_price", "OpenPrice"), ("close_price", "ClosePrice"), ("open_volume", "OpenVolume"), ("close_volume", "CloseVolume"), ("pnl", "PnL"), ("ticks_pnl", "TicksPnL"), ("price_pnl", "PricePnL"), ("commission", "Commission"))}
             missing = value["MissingDataCase"]
-            # Native incomplete flags remain visible; they never establish a complete pair.
-            # Constrain this enum-shaped field so free-text content cannot enter model facts.
-            if missing and not re.fullmatch(r"[A-Za-z0-9_]+(?:[ ,|]+[A-Za-z0-9_]+)*", missing):
-                raise failure()
-            if len(missing) > 128:
+            # Only SDK-verified enum names are public facts; raw free text is rejected.
+            if missing not in ("None", "Opening", "Closing", ""):
                 raise failure()
             if identity[:2] != (self._selected, SECURITY_ID):
                 continue
             side = None
             ref = value["EnterTradeId"]
             fill = fills.get((identity[0], identity[1], ref)) if ref else None
-            if (missing == "None" and fill and fill["Time"] == value["OpenTime"] and Decimal(fill["Price"]) == Decimal(value["OpenPrice"])
-                    and abs(Decimal(fill["Volume"])) >= abs(Decimal(value["OpenVolume"]))):
+            if (missing == "None" and opened["iso"] and Decimal(facts["open_price"]) != 0
+                    and fill and fill["Time"] == value["OpenTime"] and Decimal(fill["Price"]) == Decimal(value["OpenPrice"])
+                    and Decimal(fill["Volume"]).copy_abs() >= Decimal(value["OpenVolume"]).copy_abs()):
                 side = fill["OrderDirection"] or None
             at = closed["iso"] or opened["iso"]
             if at is None:
-                raise failure()
+                # No wall-clock query can include an undated native placeholder.
+                continue
             if not begin <= datetime.fromisoformat(at) <= finish:
                 continue
             rows.append({"native_id": identity[2], "account_id": identity[0], "security_id": identity[1],
                          "entry_ref": ref or None, "exit_ref": value["ExitTradeId"] or None,
                          **facts, "open_time": opened, "close_time": closed, "side": side,
-                         "is_complete": bool(opened["iso"] and closed["iso"] and Decimal(facts["open_volume"]) != 0 and Decimal(facts["close_volume"]) != 0 and missing == "None"),
+                         "is_complete": bool(opened["iso"] and closed["iso"] and Decimal(facts["open_price"]) != 0 and Decimal(facts["close_price"]) != 0 and Decimal(facts["open_volume"]) != 0 and Decimal(facts["close_volume"]) != 0 and missing == "None"),
                          "missing_data_case": missing or "Unknown"})
         rows.sort(key=lambda row: (row["close_time"]["iso"] or row["open_time"]["iso"], row["native_id"]), reverse=True)
         coverage = {"mode": "local_persisted_snapshot", "from": {"iso": begin.isoformat(), "kind": "Unspecified"},

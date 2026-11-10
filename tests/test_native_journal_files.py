@@ -2,6 +2,7 @@
 import copy
 import csv
 from datetime import datetime
+from decimal import localcontext
 import importlib.util
 import io
 import json
@@ -211,14 +212,51 @@ class FileJournalTests(unittest.TestCase):
         self.assertEqual(self.source.list_trades()["returned"], 0)
 
     def test_incomplete_native_flags_do_not_block_complete_history_or_establish_direction(self):
-        self.tables["HistoryMyTrade"] = [history(Id="complete"), history(Id="incomplete", MissingDataCase="MissingEntry")]
-        self.write(); listed = self.source.list_trades()
-        self.assertEqual(listed["returned"], 2)
-        incomplete = next(row for row in listed["trades"] if not row["is_complete"])
-        self.assertIsNone(incomplete["side"])
-        self.assertEqual(incomplete["missing_data_case"], "MissingEntry")
-        self.assertEqual(listed["coverage"]["incomplete_rows"], 1)
-        self.assertEqual(self.error(lambda: self.source.capture(incomplete["trade_id"])), "journal_open_trade")
+        for marker in ("Opening", "Closing", ""):
+            self.tables["HistoryMyTrade"] = [history(Id="complete"), history(Id="incomplete", MissingDataCase=marker)]
+            self.write(); listed = self.source.list_trades()
+            self.assertEqual(listed["returned"], 2)
+            incomplete = next(row for row in listed["trades"] if not row["is_complete"])
+            self.assertIsNone(incomplete["side"])
+            self.assertEqual(incomplete["missing_data_case"], marker or "Unknown")
+            self.assertEqual(listed["coverage"]["incomplete_rows"], 1)
+            self.assertEqual(self.error(lambda: self.source.capture(incomplete["trade_id"])), "journal_open_trade")
+
+    def test_entry_quantity_comparison_preserves_29_digit_magnitude_precision(self):
+        smaller = "1.0000000000000000000000000000"
+        larger = "1.0000000000000000000000000001"
+        with localcontext() as context:
+            context.prec = 28
+            for sign, side in (("", "Buy"), ("-", "Sell")):
+                self.tables["HistoryMyTrade"] = [history(OpenVolume=sign + larger)]
+                self.tables["MyTrade"] = [fill(Volume=smaller, OrderDirection=side)]; self.write()
+                row = self.source.list_trades()["trades"][0]
+                self.assertIsNone(row["side"])
+                evidence = self.source.capture(row["trade_id"])
+                self.assertIn("entry_direction_missing", evidence["quality"])
+                self.assertEqual(evidence["evidence"]["native_trade"]["data"]["open_volume"], sign + larger)
+                self.tables["MyTrade"] = [fill(Volume=larger, OrderDirection=side)]; self.write()
+                self.assertEqual(self.source.list_trades()["trades"][0]["side"], side)
+
+    def test_zero_prices_and_native_minimum_date_never_make_complete_pairs(self):
+        for changed in ({"OpenPrice": "0"}, {"ClosePrice": "0"},
+                        {"OpenTime": "01/01/0001 00:00:00"}, {"CloseTime": "01/01/0001 00:00:00"}):
+            with self.subTest(changed=changed):
+                self.tables["HistoryMyTrade"] = [history(**changed)]
+                self.tables["MyTrade"] = [fill(**({"Time": changed["OpenTime"]} if "OpenTime" in changed else
+                                                   {"Price": changed["OpenPrice"]} if "OpenPrice" in changed else {}))]
+                self.write()
+                row = self.source.list_trades()["trades"][0]
+                self.assertFalse(row["is_complete"])
+                if "OpenTime" in changed or "OpenPrice" in changed:
+                    self.assertIsNone(row["side"])
+                self.assertEqual(self.error(lambda: self.source.capture(row["trade_id"])), "journal_open_trade")
+                for field, name in (("OpenTime", "open_time"), ("CloseTime", "close_time")):
+                    if field in changed:
+                        self.assertEqual(row[name], {"iso": None, "kind": "Unspecified"})
+        self.tables["HistoryMyTrade"] = [history(), history(Id="undated", OpenTime="01/01/0001 00:00:00", CloseTime="01/01/0001 00:00:00")]
+        self.write()
+        self.assertEqual(self.source.list_trades()["returned"], 1)
 
     def test_partial_write_missing_file_and_symlink_clear_selection(self):
         key = self.source.list_trades()["trades"][0]["trade_id"]
@@ -284,6 +322,23 @@ class FileJournalTests(unittest.TestCase):
             self.assertNotIn(private, raw)
         listed["trades"][0]["open_time"]["iso"] = "changed"
         self.assertNotEqual(self.source.capture(key)["evidence"]["native_trade"]["data"]["open_time"]["iso"], "changed")
+
+    def test_mcp_list_rejects_unknown_marker_without_publishing_ascii_free_text(self):
+        spec = importlib.util.spec_from_file_location("persisted_mcp_marker", Path(__file__).resolve().parents[1] / "mcp/atas_client.py")
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        app = Workbench(self.root / "state", journal=self.source); self.addCleanup(app.close)
+        client = module.AtasBridgeClient(port=1)
+        with patch.object(client, "_persisted_request", lambda path: app.handle("GET", path, {})):
+            self.assertEqual(client.persisted_journal()["returned"], 1)
+            for marker in ("customer secret 123", "MissingEntry", "Opening Closing", "1"):
+                self.tables["HistoryMyTrade"] = [history(), history(Id="bad-marker", MissingDataCase=marker)]
+                self.write()
+                with self.assertRaises(AppError) as caught:
+                    client.persisted_journal()
+                public_error = {"ok": False, "error": str(caught.exception)}
+                self.assertNotIn(marker, json.dumps(public_error))
+                self.assertEqual(client._persisted_keys, set())
+                self.assertEqual(self.source._selection, {})
 
     def test_account_switch_during_capture_cannot_publish_old_evidence(self):
         self.tables["Portfolio"].append(portfolio("private-second"))
